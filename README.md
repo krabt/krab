@@ -11,12 +11,14 @@ mac xray 客户端，支持配置文件方式管理
 Krab 运行后会读取家目录下的文件` ~/.krab`，当启动服务的时候会执行`~/.krab/xray -c config.json`，理论上也可以兼容v2ray，入站`tag`为`http-in`，用于支持修改系统代理端口。
 
 截图：
+<table>
+  <tr>
+    <td><img src="images/image-20260415212027602.png" alt="小窗口" style="width: 200px;"></td>
+    <td><img src="images/image-20260415212100068.png" alt="配置" style="width: 200px;"></td>
+        <td><img src="images/image-20260415212117519.png" alt="编辑配置文件" style="width: 200px;"></td>
+  </tr>
+</table>
 
-<img src="images/image-20260415212027602.png" alt="image-20260415212027602" style="zoom:67%;" />
-
-<img src="images/image-20260415212100068.png" alt="image-20260415212100068" style="zoom: 50%;" />
-
-<img src="images/image-20260415212117519.png" alt="image-20260415212117519" style="zoom:50%;" />
 
 ### 功能支持
 
