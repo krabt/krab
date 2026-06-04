@@ -33,13 +33,11 @@ jobs:
       - name: Install Fyne CLI
         run: |
           go install fyne.io/fyne/v2/cmd/fyne@latest
+          echo "PATH=$(go env GOPATH)/bin:$PATH" >> $GITHUB_ENV
 
       - name: Package macOS app with Fyne
-        env:
-          PATH: ${{ env.PATH }}:$GOPATH/bin
         run: |
-          # Use the repository icon under icon/assets if present
-          fyne package -os darwin 
+          fyne package -os darwin
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
