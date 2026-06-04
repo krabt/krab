@@ -34,11 +34,9 @@ jobs:
           fyne package -os darwin -release
           zip -r krab-${{ matrix.arch }}.zip *.app
 
-      - name: Upload Release Asset
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: krab-${{ matrix.arch }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          gh release upload \
-            "${GITHUB_REF_NAME}" \
-            "krab-${{ matrix.arch }}.zip" \
-            --clobber
