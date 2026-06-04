@@ -38,7 +38,6 @@ jobs:
         env:
           PATH: ${{ env.PATH }}:$GOPATH/bin
         run: |
-          mkdir -p build
           # Use the repository icon under icon/assets if present
           fyne package -os darwin 
 
