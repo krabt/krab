@@ -5,6 +5,8 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
 
 jobs:
   build-macos:
@@ -32,9 +34,11 @@ jobs:
           fyne package -os darwin -release
           zip -r krab-${{ matrix.arch }}.zip *.app
 
-      - name: Upload
-        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
-        with:
-          name: krab-macos-${{ matrix.arch }}
-          path: |
-            krab-${{ matrix.arch }}.zip
+      - name: Upload Release Asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          gh release upload \
+            "${GITHUB_REF_NAME}" \
+            "krab-${{ matrix.arch }}.zip" \
+            --clobber
