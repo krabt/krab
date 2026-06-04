@@ -60,14 +60,49 @@ type ProcessManager struct {
 	config       *Config
 	configPath   string
 	lastModified time.Time
+	logChan      chan logEntry
+	stopLogChan  chan struct{}
+}
+
+// logEntry 日志条目
+type logEntry struct {
+	name    string
+	message string
+	isError bool
 }
 
 // NewProcessManager 创建新的进程管理器
 func NewProcessManager(configPath string) *ProcessManager {
-	return &ProcessManager{
-		processes:  make(map[string]*ProcessStatus),
-		commands:   make(map[string]*ProcessInfo),
-		configPath: configPath,
+	pm := &ProcessManager{
+		processes:   make(map[string]*ProcessStatus),
+		commands:    make(map[string]*ProcessInfo),
+		configPath:  configPath,
+		logChan:     make(chan logEntry, 256),
+		stopLogChan: make(chan struct{}),
+	}
+	// 启动日志处理goroutine
+	go pm.logWorker()
+	return pm
+}
+
+// logWorker 后台处理日志，避免频繁锁定
+func (pm *ProcessManager) logWorker() {
+	for {
+		select {
+		case entry := <-pm.logChan:
+			pm.mutex.Lock()
+			if status, exists := pm.processes[entry.name]; exists {
+				logLine := fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), entry.message)
+				// 使用环形缓冲优化
+				if len(status.Output) >= 50 {
+					status.Output = status.Output[1:]
+				}
+				status.Output = append(status.Output, logLine)
+			}
+			pm.mutex.Unlock()
+		case <-pm.stopLogChan:
+			return
+		}
 	}
 }
 
@@ -252,48 +287,72 @@ func buildSudoArgs(config ProcessConfig) []string {
 // StopProcess 停止进程
 func (pm *ProcessManager) StopProcess(name string) error {
 	pm.mutex.Lock()
-	defer pm.mutex.Unlock()
 
 	status, exists := pm.processes[name]
 	if !exists {
+		pm.mutex.Unlock()
 		return fmt.Errorf("进程 %s 不存在", name)
 	}
 
 	procInfo, cmdExists := pm.commands[name]
-	if !cmdExists || status.Status != "running" {
+	// 允许 stopping 状态进入，防止重复调用 Stop 时报“没有运行”的错，同时隔绝 Start
+	if !cmdExists || (status.Status != "running" && status.Status != "stopping") {
+		pm.mutex.Unlock()
 		return fmt.Errorf("进程 %s 没有运行", name)
 	}
 
+	// 如果已经在停止中了，直接返回，防止重复触发停止逻辑
+	if status.Status == "stopping" {
+		pm.mutex.Unlock()
+		log.Printf("进程 %s 正在停止中，请勿重复操作", name)
+		return nil
+	}
+
+	// 1. 关键点：先标记为 stopping 状态
+	status.Status = "stopping"
 	pm.addLog(name, "INFO: 正在停止进程...")
 
-	// 取消上下文
+	// 取消上下文触发优雅退出
 	procInfo.Cancel()
+	pm.mutex.Unlock() // 2. 关键点：立刻释放锁！不要带着锁去等待 IO
 
-	// 给进程一些时间优雅退出
+	// 在锁外面执行等待逻辑
 	done := make(chan error, 1)
 	go func() {
 		done <- procInfo.Cmd.Wait()
 	}()
 
-	// 等待 5 秒，如果还没退出就强制杀死
+	timeout := 5 * time.Second
+	var killed bool
+
+	// 等待进程退出
 	select {
 	case <-done:
-		// 进程已经退出
-	case <-time.After(3 * time.Second):
+		// 进程已经自然退出
+	case <-time.After(timeout):
 		// 超时，强制杀死进程组
 		if procInfo.Cmd.Process != nil {
-			syscall.Kill(-procInfo.Cmd.Process.Pid, syscall.SIGKILL)
-			<-done // 等待 Wait() 完成
+			// 注意：这里需要考虑系统兼容性（Windows 不支持负数 PID 杀进程组）
+			_ = syscall.Kill(-procInfo.Cmd.Process.Pid, syscall.SIGKILL)
+			<-done // 确保 Wait() 协程回收
+			killed = true
 		}
-		pm.addLog(name, "WARNING: 进程未在 5 秒内退出，已强制终止")
 	}
 
-	delete(pm.commands, name)
+	// 3. 退出完毕后，重新加锁更新最终状态
+	pm.mutex.Lock()
+	defer pm.mutex.Unlock()
 
+	delete(pm.commands, name)
 	status.Status = "stopped"
 	status.PID = 0
 
-	pm.addLog(name, "INFO: 进程已手动停止")
+	if killed {
+		pm.addLog(name, fmt.Sprintf("WARNING: 进程未在 %v 内退出，已强制终止", timeout))
+	} else {
+		pm.addLog(name, "INFO: 进程已手动停止")
+	}
+
 	log.Printf("进程 %s 已停止", name)
 	return nil
 }
@@ -402,27 +461,31 @@ func (pm *ProcessManager) monitorProcess(name string) {
 			pm.addLog(name, fmt.Sprintf("INFO: %d秒后自动重启 (第%d次重启)", restartDelay, status.Restarts))
 			log.Printf("%d秒后自动重启进程 %s (第%d次重启)", restartDelay, name, status.Restarts)
 
+			// 保存一份配置副本，避免竞态条件
+			configName := name
 			// 使用 goroutine 避免阻塞
-			go func() {
-				time.Sleep(time.Duration(restartDelay) * time.Second)
-				err := pm.StartProcess(name)
+			go func(processName string, delay int) {
+				time.Sleep(time.Duration(delay) * time.Second)
+				err := pm.StartProcess(processName)
 				if err != nil {
-					log.Printf("自动重启进程 %s 失败: %v", name, err)
+					log.Printf("自动重启进程 %s 失败: %v", processName, err)
 				}
-			}()
+			}(configName, restartDelay)
 		}
 	}
 }
 
-// addLog 添加日志
+// addLog 添加日志 - 使用通道避免长时间持有锁
 func (pm *ProcessManager) addLog(name, message string) {
-	if status, exists := pm.processes[name]; exists {
-		logLine := fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), message)
-		status.Output = append(status.Output, logLine)
-		if len(status.Output) > 50 {
-			status.Output = status.Output[1:]
-		}
+	select {
+	case pm.logChan <- logEntry{name: name, message: message, isError: false}:
+	default:
+		// 如果通道满，丢弃最旧的日志以防止堵塞
+		<-pm.logChan
+		pm.logChan <- logEntry{name: name, message: message, isError: false}
 	}
+	// 同时记录到标准日志
+	log.Printf("%s: %s", name, message)
 }
 
 // logWriter 用于捕获进程输出
@@ -438,25 +501,18 @@ func (lw *logWriter) Write(p []byte) (n int, err error) {
 		return len(p), nil
 	}
 
-	lw.pm.mutex.Lock()
-	defer lw.pm.mutex.Unlock()
+	// 构建日志信息
+	prefix := "STDOUT"
+	if !lw.isStdout {
+		prefix = "STDERR"
+	}
+	message := fmt.Sprintf("%s: %s", prefix, line)
 
-	if status, exists := lw.pm.processes[lw.name]; exists {
-		// 添加时间戳和类型标识
-		prefix := "STDOUT"
-		if !lw.isStdout {
-			prefix = "STDERR"
-		}
-		logLine := fmt.Sprintf("[%s] %s: %s", time.Now().Format("15:04:05"), prefix, line)
-
-		// 保留最近 50 行输出
-		status.Output = append(status.Output, logLine)
-		if len(status.Output) > 50 {
-			status.Output = status.Output[1:]
-		}
-
-		// 也记录到主日志
-		log.Printf("进程 %s %s: %s", lw.name, prefix, line)
+	// 使用通道异步处理日志，避免持有锁
+	select {
+	case lw.pm.logChan <- logEntry{name: lw.name, message: message, isError: !lw.isStdout}:
+	default:
+		// 如果通道满，防止阻塞进程输出
 	}
 
 	return len(p), nil

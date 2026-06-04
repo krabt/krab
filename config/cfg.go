@@ -3,7 +3,10 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+
+	"github.com/tailscale/hujson"
 )
 
 type XrayCfg struct {
@@ -260,7 +263,15 @@ func (x *XRay) ReadCfg(cfgPath string) (err error) {
 		return nil
 	}
 	cfgData := &XrayCfg{}
-	err = json.Unmarshal(fData, cfgData)
+	// 处理带注释的json
+	ast, err := hujson.Parse(fData)
+	if err != nil {
+		log.Fatalf("解析注释失败: %v", err)
+	}
+	ast.Standardize()
+	standardJSON := ast.Pack()
+
+	err = json.Unmarshal(standardJSON, cfgData)
 	if err != nil {
 		fmt.Printf("解析JSON失败: %v", err)
 		return nil

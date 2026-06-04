@@ -5,4 +5,4 @@ Icon = "./icon/assets/app.png"
 Name = "Krab"
 ID = "io.local.krab"
 Version = "0.1.0"
-Build = 10
+Build = 14
