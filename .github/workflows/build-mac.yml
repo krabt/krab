@@ -26,14 +26,11 @@ jobs:
           cache: true
 
       - name: build pkg
-        env:
-          GOPATH: "${HOME}/go"
-          GOBIN: "${HOME}/go/bin"
-          PATH: "$HOME/bin:$GOROOT/bin:$GOBIN:$PATH"
         run: |
           go install fyne.io/tools/cmd/fyne@latest
+          export PATH="$(go env GOPATH)/bin:$PATH"
           fyne package -os darwin -release
-          zip -r Krab-${{ matrix.arch }}.zip *.app
+          zip -r krab-${{ matrix.arch }}.zip *.app
 
       - name: Upload
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
