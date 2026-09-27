@@ -1,13 +1,13 @@
 [Desktop Entry]
 Version=1.0
 Name=My Product
-Comment=A xray application
+Comment=My Product Description
 # The Exec line includes %u to pass the URL to the application
-Exec=/usr/local/bin/xray %u
+Exec=/usr/local/bin/ %u
 Terminal=false
 Type=Application
-Icon=xray
+Icon=
 Categories=Utility;
-StartupWMClass=xray
+StartupWMClass=
 
  

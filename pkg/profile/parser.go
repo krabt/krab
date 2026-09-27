@@ -1,0 +1,354 @@
+// Package profile parses vmess://, vless://, trojan://, ss:// share links
+// into Server profiles, and persists the saved server list as JSON.
+package profile
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+)
+
+// Server is one saved proxy profile, storage- and UI-agnostic.
+type Server struct {
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	Protocol        string            `json:"protocol"` // vmess, vless, trojan, shadowsocks
+	Address         string            `json:"address"`
+	Port            int               `json:"port"`
+	UUID            string            `json:"uuid,omitempty"`     // vmess/vless
+	Password        string            `json:"password,omitempty"` // trojan/ss
+	Method          string            `json:"method,omitempty"`   // ss cipher
+	Extra           map[string]string `json:"extra,omitempty"`    // network, tls, sni, path, etc.
+	OutboundRuleIDs []string          `json:"outboundRuleIds,omitempty"`
+}
+
+// ParseLink dispatches to the right parser based on the URI scheme.
+func ParseLink(link string) (Server, error) {
+	link = strings.TrimSpace(link)
+	switch {
+	case strings.HasPrefix(link, "vmess://"):
+		return parseVMess(link)
+	case strings.HasPrefix(link, "vless://"):
+		return parseVLESS(link)
+	case strings.HasPrefix(link, "trojan://"):
+		return parseTrojan(link)
+	case strings.HasPrefix(link, "ss://"):
+		return parseShadowsocks(link)
+	case strings.HasPrefix(link, "hysteria2://"), strings.HasPrefix(link, "hy2://"):
+		return parseHysteria2(link)
+	case strings.HasPrefix(link, "ssh://"):
+		return parseSSH(link)
+	default:
+		return Server{}, fmt.Errorf("unsupported or unrecognized link format")
+	}
+}
+
+// IsSubscriptionURL reports whether input looks like a subscription URL
+// (http/https) rather than a single vmess/vless/trojan/ss share link.
+func IsSubscriptionURL(input string) bool {
+	input = strings.TrimSpace(input)
+	return strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://")
+}
+
+// ParseSubscription parses the body of a subscription URL, which is
+// conventionally either:
+//   - a base64-encoded blob that decodes to a newline-separated list of
+//     share links (the near-universal "subscription" format used by
+//     V2RayN/V2RayNG/Shadowrocket/Clash-compatible clients), or
+//   - a plain newline-separated list of share links, uncompressed.
+//
+// Lines that fail to parse are skipped rather than failing the whole
+// subscription, since a subscription commonly mixes supported and
+// unsupported (e.g. ss2022, vmess with unusual fields) entries. Many
+// providers also throw in a few non-functional "info" entries disguised
+// as real links -- e.g. a vless:// whose host is literally
+// "dontUseThis" -- just to surface plan/expiry/traffic details inside
+// clients that list every node. Those are recognized by isInfoNode and
+// dropped rather than imported as dead servers.
+func ParseSubscription(body string) ([]Server, []string, []error) {
+	content := strings.TrimSpace(body)
+
+	if decoded, ok := tryBase64(content); ok {
+		content = decoded
+	}
+
+	var servers []Server
+	var notes []string
+	var errs []error
+	lines := strings.Split(content, "\n")
+	if structured, structErrs, ok := parseStructured(content); ok {
+		errs, lines = structErrs, nil
+		for _, s := range structured {
+			if isInfoNode(s) {
+				notes = append(notes, s.Name)
+			} else {
+				servers = append(servers, s)
+			}
+		}
+	}
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		server, err := ParseLink(line)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%.40s...: %w", line, err))
+			continue
+		}
+		if isInfoNode(server) {
+			if server.Name != "" {
+				notes = append(notes, server.Name)
+			}
+			continue
+		}
+		servers = append(servers, server)
+	}
+
+	if len(servers) == 0 && len(errs) == 0 {
+		errs = append(errs, fmt.Errorf("subscription content was empty"))
+	}
+	return servers, notes, errs
+}
+
+// isInfoNode reports whether a parsed entry looks like one of the fake
+// "informational" nodes some subscription providers mix into the real
+// server list -- e.g. a vless:// link whose host is a placeholder like
+// "dontUseThis" and whose name carries plan/expiry/traffic text instead
+// of a real location, purely so it shows up as a row in clients that
+// don't otherwise expose that info.
+func isInfoNode(s Server) bool {
+	host := strings.ToLower(s.Address)
+	for _, marker := range []string{"dontuse", "don't use", "do-not-use", "not-a-server", "placeholder", "noconnect"} {
+		if strings.Contains(host, marker) {
+			return true
+		}
+	}
+	name := strings.ToLower(s.Name)
+	nameMarkers := []string{
+		"expire", "expiry", "expir", // English
+		"remain", "remaining", "traffic", "data used", "days left",
+		"انقضا", "باقیمانده", "حجم", "ترافیک", // Persian: expiry, remaining, volume, traffic
+		"到期", "剩余", "流量", // Chinese: expires, remaining, traffic
+	}
+	for _, marker := range nameMarkers {
+		if strings.Contains(name, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// SubscriptionUsage is traffic/expiry info a subscription provider can
+// report via the (informal but widely adopted) "Subscription-Userinfo"
+// response header, e.g.:
+//
+//	Subscription-Userinfo: upload=123; download=456; total=10737418240; expire=1780000000
+type SubscriptionUsage struct {
+	UploadBytes   int64 `json:"uploadBytes"`
+	DownloadBytes int64 `json:"downloadBytes"`
+	TotalBytes    int64 `json:"totalBytes"`
+	ExpireUnix    int64 `json:"expireUnix"` // 0 if not reported
+}
+
+// ParseSubscriptionUserinfo parses a Subscription-Userinfo header value.
+// Returns false if the header was empty or carried none of the known
+// fields.
+func ParseSubscriptionUserinfo(header string) (SubscriptionUsage, bool) {
+	var usage SubscriptionUsage
+	found := false
+	for _, part := range strings.Split(header, ";") {
+		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(kv[1]), 10, 64)
+		if err != nil {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(kv[0])) {
+		case "upload":
+			usage.UploadBytes, found = n, true
+		case "download":
+			usage.DownloadBytes, found = n, true
+		case "total":
+			usage.TotalBytes, found = n, true
+		case "expire":
+			usage.ExpireUnix, found = n, true
+		}
+	}
+	return usage, found
+}
+
+func tryBase64(s string) (string, bool) {
+	// A raw link list already contains "://", which is never valid base64;
+	// treating it as base64 first would otherwise silently misparse it.
+	if strings.Contains(s, "://") {
+		return "", false
+	}
+	return decodeBase64(strings.Join(strings.Fields(s), ""))
+}
+
+// vmess:// carries a base64-encoded JSON payload, not a standard URI.
+func parseVMess(link string) (Server, error) {
+	decoded, ok := decodeBase64(strings.TrimPrefix(link, "vmess://"))
+	if !ok {
+		return Server{}, fmt.Errorf("invalid vmess link: not base64")
+	}
+
+	// Generators disagree on whether numeric fields (port, aid) are JSON
+	// numbers or strings, so decode loosely and stringify everything.
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(decoded), &raw); err != nil {
+		return Server{}, fmt.Errorf("invalid vmess payload: %w", err)
+	}
+	field := func(k string) string {
+		switch v := raw[k].(type) {
+		case string:
+			return strings.TrimSpace(v)
+		case float64:
+			return strconv.FormatFloat(v, 'f', -1, 64)
+		default:
+			return ""
+		}
+	}
+
+	extra := map[string]string{
+		"network":    field("net"),
+		"tls":        field("tls"),
+		"path":       field("path"),
+		"host":       field("host"),
+		"sni":        field("sni"),
+		"alpn":       field("alpn"),
+		"fp":         field("fp"),
+		"headerType": field("type"),
+		"scy":        field("scy"),
+	}
+	for k, v := range extra {
+		if v == "" {
+			delete(extra, k)
+		}
+	}
+
+	return Server{
+		Name:     field("ps"),
+		Protocol: "vmess",
+		Address:  field("add"),
+		Port:     atoiSafe(field("port")),
+		UUID:     field("id"),
+		Extra:    extra,
+	}, nil
+}
+
+func decodeBase64(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+		if decoded, err := enc.DecodeString(s); err == nil {
+			return string(decoded), true
+		}
+	}
+	return "", false
+}
+
+// vless:// and trojan:// are standard URIs: scheme://user@host:port?query#name
+func parseVLESS(link string) (Server, error) {
+	u, err := url.Parse(link)
+	if err != nil {
+		return Server{}, fmt.Errorf("invalid vless link: %w", err)
+	}
+	return Server{
+		Name:     nameOrDefault(u.Fragment, u.Host),
+		Protocol: "vless",
+		Address:  u.Hostname(),
+		Port:     atoiSafe(u.Port()),
+		UUID:     u.User.Username(),
+		Extra:    queryToExtra(u.Query()),
+	}, nil
+}
+
+func parseTrojan(link string) (Server, error) {
+	u, err := url.Parse(link)
+	if err != nil {
+		return Server{}, fmt.Errorf("invalid trojan link: %w", err)
+	}
+	return Server{
+		Name:     nameOrDefault(u.Fragment, u.Host),
+		Protocol: "trojan",
+		Address:  u.Hostname(),
+		Port:     atoiSafe(u.Port()),
+		Password: u.User.Username(),
+		Extra:    queryToExtra(u.Query()),
+	}, nil
+}
+
+// ss:// commonly appears as ss://base64(method:password)@host:port#name
+func parseShadowsocks(link string) (Server, error) {
+	// Legacy form: ss://BASE64(method:password@host:port)#name -- no '@'
+	// before the fragment. Re-encode it into the SIP002 shape below.
+	body, fragment, _ := strings.Cut(strings.TrimPrefix(link, "ss://"), "#")
+	if !strings.Contains(body, "@") {
+		if decoded, ok := decodeBase64(body); ok && strings.Contains(decoded, "@") {
+			creds, hostport, _ := strings.Cut(decoded, "@")
+			link = "ss://" + base64.RawURLEncoding.EncodeToString([]byte(creds)) + "@" + hostport
+			if fragment != "" {
+				link += "#" + fragment
+			}
+		}
+	}
+
+	u, err := url.Parse(link)
+	if err != nil {
+		return Server{}, fmt.Errorf("invalid shadowsocks link: %w", err)
+	}
+
+	method, password := u.User.Username(), ""
+	if pw, ok := u.User.Password(); ok {
+		password = pw
+	} else {
+		// userinfo is base64(method:password) when no ':' was present in the URL.
+		if decoded, ok := decodeBase64(u.User.Username()); ok {
+			if m, p, found := strings.Cut(decoded, ":"); found {
+				method, password = m, p
+			}
+		}
+	}
+
+	return Server{
+		Name:     nameOrDefault(u.Fragment, u.Host),
+		Protocol: "shadowsocks",
+		Address:  u.Hostname(),
+		Port:     atoiSafe(u.Port()),
+		Method:   method,
+		Password: password,
+	}, nil
+}
+
+func queryToExtra(q url.Values) map[string]string {
+	extra := make(map[string]string, len(q))
+	for k := range q {
+		extra[k] = q.Get(k)
+	}
+	return extra
+}
+
+func nameOrDefault(name, fallback string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fallback
+	}
+	return name
+}
+
+func atoiSafe(s string) int {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return n
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
+}

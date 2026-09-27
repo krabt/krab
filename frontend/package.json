@@ -1,22 +1,24 @@
 {
-  "name": "frontend",
+  "name": "krab-frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build:dev": "vue-tsc && vite build --minify false --mode development",
-    "build": "vue-tsc && vite build --mode production",
+    "build:dev": "vite build --minify false --mode development",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@wailsio/runtime": "latest",
-    "vue": "^3.2.45"
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^6.0.0",
-    "typescript": "^4.9.3",
-    "vite": "^8.0.5",
-    "vue-tsc": "^1.0.11"
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "vite": "^5.3.1"
   }
 }

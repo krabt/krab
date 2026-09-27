@@ -1,0 +1,115 @@
+//go:build windows
+
+// Package system sets and clears the OS-level HTTP/SOCKS proxy so that
+// system traffic routes through the local xray inbound (phase 1: no TUN).
+package system
+
+import (
+	"fmt"
+	"syscall"
+
+	"golang.org/x/sys/windows/registry"
+)
+
+const internetSettingsPath = `Software\Microsoft\Windows\CurrentVersion\Internet Settings`
+
+// proxyBypass keeps localhost and private LAN ranges (router admin pages,
+// NAS, printers) off the proxy; "<local>" alone only covers dotless names.
+const proxyBypass = "localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*;<local>"
+
+// ClearStaleProxy turns the system proxy off only if it still points at
+// host:port -- i.e. Krab set it and then exited without cleaning up (crash,
+// killed process). A proxy the user configured themselves is left alone.
+func ClearStaleProxy(host string, port int) error {
+	key, err := registry.OpenKey(registry.CURRENT_USER, internetSettingsPath, registry.QUERY_VALUE)
+	if err != nil {
+		return err
+	}
+	enabled, _, _ := key.GetIntegerValue("ProxyEnable")
+	server, _, _ := key.GetStringValue("ProxyServer")
+	key.Close()
+
+	if enabled == 1 && server == fmt.Sprintf("%s:%d", host, port) {
+		return ClearProxy()
+	}
+	return nil
+}
+
+// SetProxy writes the per-user Internet Settings registry keys that
+// browsers and most Windows apps read for their proxy configuration.
+// This intentionally does NOT use `netsh winhttp set proxy`: that command
+// requires an elevated (admin) process, and it only affects WinHTTP-based
+// services (e.g. Windows Update), not the browsers users actually care
+// about — HKCU Internet Settings is what those honor, and it needs no
+// elevation since it's a per-user key.
+func SetProxy(host string, port, socksPort int) error {
+	return SetProxyConfig(ProxyConfig{host, port, host, port, host, socksPort})
+}
+
+func SetProxyConfig(config ProxyConfig) error {
+	key, err := registry.OpenKey(registry.CURRENT_USER, internetSettingsPath, registry.SET_VALUE)
+	if err != nil {
+		return fmt.Errorf("open internet settings: %w", err)
+	}
+	defer key.Close()
+
+	if err := key.SetDWordValue("ProxyEnable", 1); err != nil {
+		return fmt.Errorf("set ProxyEnable: %w", err)
+	}
+	server := fmt.Sprintf("http=%s:%d;https=%s:%d;socks=%s:%d", config.HTTPHost, config.HTTPPort, config.HTTPSHost, config.HTTPSPort, config.SOCKSHost, config.SOCKSPort)
+	if err := key.SetStringValue("ProxyServer", server); err != nil {
+		return fmt.Errorf("set ProxyServer: %w", err)
+	}
+	if err := key.SetStringValue("ProxyOverride", proxyBypass); err != nil {
+		return fmt.Errorf("set ProxyOverride: %w", err)
+	}
+
+	notifySettingsChanged()
+	return nil
+}
+
+// ClearProxy resets the Windows system proxy to direct.
+func ClearProxy() error {
+	key, err := registry.OpenKey(registry.CURRENT_USER, internetSettingsPath, registry.SET_VALUE)
+	if err != nil {
+		return fmt.Errorf("open internet settings: %w", err)
+	}
+	defer key.Close()
+
+	if err := key.SetDWordValue("ProxyEnable", 0); err != nil {
+		return fmt.Errorf("set ProxyEnable: %w", err)
+	}
+
+	notifySettingsChanged()
+	return nil
+}
+
+func GetProxyStatus() (ProxyStatus, error) {
+	key, err := registry.OpenKey(registry.CURRENT_USER, internetSettingsPath, registry.QUERY_VALUE)
+	if err != nil {
+		return ProxyStatus{}, err
+	}
+	defer key.Close()
+	enabled, _, err := key.GetIntegerValue("ProxyEnable")
+	if err != nil {
+		return ProxyStatus{}, err
+	}
+	return ProxyStatus{Enabled: enabled == 1}, nil
+}
+
+// notifySettingsChanged tells already-running apps (browsers, etc.) to pick
+// up the new proxy settings immediately instead of waiting for their own
+// poll interval. Best-effort: failures here don't affect the registry
+// change itself, which is what actually matters.
+func notifySettingsChanged() {
+	wininet := syscall.NewLazyDLL("wininet.dll")
+	setOption := wininet.NewProc("InternetSetOptionW")
+
+	const (
+		internetOptionSettingsChanged = 39
+		internetOptionRefresh         = 37
+	)
+
+	setOption.Call(0, internetOptionSettingsChanged, 0, 0)
+	setOption.Call(0, internetOptionRefresh, 0, 0)
+}

@@ -3,26 +3,26 @@
 #
 # The lines below are called `modelines`. See `:help modeline`
 
-name: "xray"
+name: ""
 arch: ${GOARCH}
 platform: "linux"
 version: "0.1.0"
 section: "default"
 priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
-description: "A xray application"
+description: "krab Description"
 vendor: "My Company"
 homepage: "https://wails.io"
 license: "MIT"
 release: "1"
 
 contents:
-  - src: "./bin/xray"
-    dst: "/usr/local/bin/xray"
+  - src: "./bin/"
+    dst: "/usr/local/bin/"
   - src: "./build/appicon.png"
-    dst: "/usr/share/icons/hicolor/128x128/apps/xray.png"
-  - src: "./build/linux/xray.desktop"
-    dst: "/usr/share/applications/xray.desktop"
+    dst: "/usr/share/icons/hicolor/128x128/apps/.png"
+  - src: "./build/linux/.desktop"
+    dst: "/usr/share/applications/.desktop"
 
 # Default dependencies for the GTK4 + WebKitGTK 6.0 stack (Ubuntu 24.04+ / Debian 13+)
 depends:

@@ -1,7 +1,7 @@
 version: '3'
 
 vars:
-  APP_NAME: "xray"
+  APP_NAME: "krab"
   BIN_DIR: "bin"
   PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "pnpm"}}'
   VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
@@ -23,11 +23,26 @@ tasks:
     summary: Builds the application
     cmds:
       - task: "{{.GOOS}}:build"
+  clean:
+    desc: 清空 bin 目录
+    cmds:
+      - cmd: rm -rf bin && mkdir -p bin
+        platforms: [darwin, linux]
+
+      - cmd: powershell -NoProfile -Command "if (Test-Path bin) { Remove-Item -Recurse -Force bin }; New-Item -ItemType Directory -Force bin | Out-Null"
+        platforms: [windows]
 
   package:
     summary: Packages a production build of the application
     cmds:
+      - task: "clean"
       - task: "{{.GOOS}}:package"
+      
+  dmg:
+    summary: Packages a production build of the application
+    cmds:
+      - task: "clean"
+      - task: "{{.GOOS}}:package:dmg"
 
   run:
     summary: Runs the application

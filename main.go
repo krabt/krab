@@ -2,86 +2,151 @@ package main
 
 import (
 	"embed"
-
 	"log"
+	"os"
+	"runtime"
+	"slices"
 	"time"
 
+	"github.com/krabt/krab/internal/tray"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
-// Wails uses Go's `embed` package to embed the frontend files into the binary.
-// Any files in the frontend/dist folder will be embedded into the binary and
-// made available to the frontend.
-// See https://pkg.go.dev/embed for more information.
-
-//go:embed frontend/dist
+//go:embed all:frontend/dist
 var assets embed.FS
 
-func init() {
-	// Register a custom event whose associated data type is string.
-	// This is not required, but the binding generator will pick up registered events
-	// and provide a strongly typed JS/TS API for them.
-	application.RegisterEvent[string]("time")
+//go:embed build/appicon.png
+var trayIconPNG []byte
+
+const (
+	relaunchWaitFlag       = "--krab-relaunch-wait"
+	legacyRelaunchWaitFlag = "--kite-relaunch-wait"
+)
+
+var singleInstanceKey = [32]byte{
+	0x6b, 0x69, 0x74, 0x65, 0xa1, 0x5e, 0x9f, 0x0a,
+	0x9e, 0x3b, 0x4a, 0x2e, 0x8c, 0x7c, 0x3a, 0x6b,
+	0x2b, 0x3f, 0x6a, 0x41, 0x6b, 0x69, 0x74, 0x65,
+	0xa1, 0x5e, 0x9f, 0x0a, 0x9e, 0x3b, 0x4a, 0x2e,
 }
 
-// main function serves as the application's entry point. It initializes the application, creates a window,
-// and starts a goroutine that emits a time-based event every second. It subsequently runs the application and
-// logs any error that might occur.
-func main() {
+func init() {
+	application.RegisterEvent[map[string]int64]("update:progress")
+	application.RegisterEvent[string]("profile:selected")
+}
 
-	// Create a new Wails application by providing the necessary options.
-	// Variables 'Name' and 'Description' are for application metadata.
-	// 'Assets' configures the asset server with the 'FS' variable pointing to the frontend files.
-	// 'Bind' is a list of Go struct instances. The frontend has access to the methods of these instances.
-	// 'Mac' options tailor the application when running an macOS.
+func main() {
+	if slices.Contains(os.Args[1:], relaunchWaitFlag) || slices.Contains(os.Args[1:], legacyRelaunchWaitFlag) {
+		time.Sleep(3 * time.Second)
+	}
+
+	backend := NewApp()
+	var window *application.WebviewWindow
+
 	app := application.New(application.Options{
-		Name:        "xray",
-		Description: "A demo of using raw HTML & CSS",
+		Name:        "Krab",
+		Description: "A modern Xray-core client",
+		Icon:        trayIconPNG,
 		Services: []application.Service{
-			application.NewService(&GreetService{}),
+			application.NewService(backend),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
 		},
+		OnShutdown: backend.shutdown,
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID:      "krab-a15e9f0a-9e3b-4a2e-8c7c-3a6b2b3f6a41",
+			EncryptionKey: singleInstanceKey,
+			OnSecondInstanceLaunch: func(_ application.SecondInstanceData) {
+				if window != nil {
+					window.Show()
+					window.Restore()
+					window.Focus()
+				}
+			},
+		},
 		Mac: application.MacOptions{
-			ApplicationShouldTerminateAfterLastWindowClosed: true,
+			ApplicationShouldTerminateAfterLastWindowClosed: false,
+			ActivationPolicy: application.ActivationPolicyAccessory,
 		},
 	})
 
-	// Create a new window with the necessary options.
-	// 'Title' is the title of the window.
-	// 'Mac' options tailor the window when running on macOS.
-	// 'BackgroundColour' is the background colour of the window.
-	// 'URL' is the URL that will be loaded into the webview.
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "Window 1",
-		// Window sized to the golden ratio (1000 / 618 ≈ 1.618).
-		Width:  1000,
-		Height: 618,
+	window = app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:                      "Krab",
+		Width:                      800,
+		Height:                     500,
+		URL:                        "/",
+		BackgroundColour:           application.NewRGB(28, 28, 30),
+		DefaultContextMenuDisabled: false,
 		Mac: application.MacWindow{
-			InvisibleTitleBarHeight: 50,
-			Backdrop:                application.MacBackdropTranslucent,
-			TitleBar:                application.MacTitleBarHiddenInset,
+			Appearance: application.NSAppearanceNameDarkAqua,
+			TitleBar: application.MacTitleBar{
+				AppearsTransparent: true,
+			},
 		},
-		BackgroundColour: application.NewRGB(6, 7, 15),
-		URL:              "/",
+		Windows: application.WindowsWindow{
+			Theme: application.Dark,
+		},
 	})
 
-	// Create a goroutine that emits an event containing the current time every second.
-	// The frontend can listen to this event and update the UI accordingly.
-	go func() {
-		for {
-			now := time.Now().Format(time.RFC1123)
-			app.Event.Emit("time", now)
-			time.Sleep(time.Second)
+	backend.startup(app, window)
+	profiles, _ := backend.ListProfiles()
+	choices := make([]tray.ServerChoice, 0, len(profiles))
+	for _, server := range profiles {
+		choices = append(choices, tray.ServerChoice{ID: server.ID, Name: server.Name})
+	}
+	selectedServerID := ""
+	if settings := backend.GeoSettings(); settings.UI != nil {
+		selectedServerID, _ = settings.UI["selectedServerId"].(string)
+	}
+	selectedServerExists := false
+	for _, choice := range choices {
+		if choice.ID == selectedServerID {
+			selectedServerExists = true
+			break
 		}
-	}()
+	}
+	if !selectedServerExists && len(choices) > 0 {
+		selectedServerID = choices[0].ID
+	}
+	proxyStatus, _ := backend.SystemProxyStatus()
+	backend.systemTray = tray.SetupSystemTray(app, trayIconPNG, choices, selectedServerID, proxyStatus.Enabled,
+		func() {
+			window.Show()
+			window.Restore()
+			window.Focus()
+		},
+		func(id string) { _ = backend.Connect(id, "proxy", false) },
+		func() { _ = backend.Disconnect() },
+		func() { _ = backend.SetSystemProxy(backend.currentProxyConfig()) },
+		func() { _ = backend.ClearSystemProxy() },
+		func() { app.Clipboard.SetText(backend.terminalProxyCommand()) },
+		func(id string) { app.Event.Emit("profile:selected", id); window.Show(); window.Focus() },
+		func() {
+			backend.quitting = true
+			app.Quit()
+		},
+	)
 
-	// Run the application. This blocks until the application has been exited.
-	err := app.Run()
+	menu := app.NewMenu()
+	if runtime.GOOS == "darwin" {
+		menu.AddRole(application.AppMenu)
+	}
+	menu.AddRole(application.FileMenu)
+	menu.AddRole(application.EditMenu)
+	menu.AddRole(application.ViewMenu)
+	menu.AddRole(application.WindowMenu)
+	window.SetMenu(menu)
 
-	// If an error occurred while running the application, log it and exit.
-	if err != nil {
-		log.Fatal(err)
+	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		if !backend.quitting {
+			event.Cancel()
+			window.Hide()
+		}
+	})
+
+	if err := app.Run(); err != nil {
+		log.Printf("Krab exited with an error: %v", err)
 	}
 }

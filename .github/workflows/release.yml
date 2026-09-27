@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            artifact: krab-windows-amd64.exe
+            binpath: bin/krab.exe
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            artifact: krab-linux-amd64
+            binpath: bin/krab
+          # macos-14 (Apple Silicon) instead of macos-13: much shorter
+          # GitHub queue times, and Apple Silicon is what most current Mac
+          # users actually have.
+          - os: macos-14
+            goos: darwin
+            goarch: arm64
+            artifact: krab-macos-arm64
+            binpath: bin/krab
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install Linux build dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential pkg-config
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+
+      - name: Resolve Go dependencies
+        run: go mod tidy
+
+      - name: Run tests
+        run: go test ./pkg/...
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "value=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        run: wails3 build GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} VERSION=${{ steps.version.outputs.value }}
+
+      - name: Rename binary
+        shell: bash
+        run: cp "${{ matrix.binpath }}" "${{ matrix.artifact }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # Use this tag's own CHANGELOG.md section as the release notes
+      # (already written with an emoji + a plain-language explanation of
+      # what changed and why) instead of GitHub's auto-generated raw
+      # commit list, which reads like a diff, not a changelog.
+      - name: Extract changelog section for this tag
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="$version" '
+            BEGIN { found = 0 }
+            /^## / {
+              if (found) exit
+              if ($0 ~ "## .* v" ver "( |$)") { found = 1; next }
+              next
+            }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "No CHANGELOG.md section found for ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body_path: release-notes.md
