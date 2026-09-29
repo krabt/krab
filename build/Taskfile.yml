@@ -54,7 +54,7 @@ tasks:
       - sh: pnpm --version
         msg: "pnpm not found"
     cmds:
-      - pnpm install
+      - pnpm install --frozen-lockfile
 
   install:frontend:deps:yarn:
     dir: frontend

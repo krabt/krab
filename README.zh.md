@@ -34,9 +34,9 @@
 | --- | --- |
 | Windows (x64) | `krab-windows-amd64.exe` |
 | Linux (x64) | `krab-linux-amd64` |
-| macOS (Apple Silicon) | `krab-macos-arm64` |
+| macOS (Apple Silicon) | `krab-macos-arm64.dmg` |
 
-每个平台都是单个便携可执行文件——无需安装程序，无需管理员权限（macOS 版本是从 Wails 3 生成的 `.app` 包中提取出的原始二进制文件；关于这带来的 Gatekeeper 提示以及如何绕过它，见[已知限制](#已知限制--后续计划)）。安装后，程序会在启动时检查新版本，一键即可自我更新。
+Windows 和 Linux 提供便携可执行文件，macOS 提供包含 Krab 应用包的 DMG。代理模式无需管理员权限。未签名应用的系统提示见[已知限制](#已知限制--后续计划)。安装后，程序会在启动时检查新版本，并支持一键更新。
 
 ## 功能
 
@@ -124,7 +124,7 @@ krab/
 - **Linux 系统代理仅支持 GNOME**（`gsettings`）—— 其他桌面环境需要在 `internal/system/proxy_linux.go` 中实现各自的后端。
 - **Kill Switch 仅限 Windows** —— 通过 `netsh advfirewall` 规则实现（`internal/system/killswitch_windows.go`）；Linux/macOS 需要各自的后端（`iptables`/`pfctl`），目前尚未实现（该开关在这些平台上被隐藏，与 TUN 模式相同）。
 - **原生最小化按钮仍然只是最小化到任务栏** —— 关闭窗口会隐藏到托盘，最小化则保持操作系统的默认行为。
-- **没有代码签名** —— Windows SmartScreen 和 macOS Gatekeeper 都会对未签名的二进制文件发出警告；目前属于预期情况。在 macOS 上，首次运行下载的二进制文件需要执行 `xattr -d com.apple.quarantine krab-macos-arm64`（或右键 → 打开）来绕过 Gatekeeper，因为它没有经过公证。在 Windows 上，杀毒软件（包括 Defender）有时会在 Krab 将 `wintun.dll` 写入自身旁边后立即将其隔离，因为这类与内核相关的网络 DLL 很容易被启发式检测标记——WireGuard、v2rayN 等基于 Wintun 的应用也会遇到同样的问题。如果 TUN 模式因类似“找不到文件”的错误而失败，请将 Krab 所在文件夹加入杀毒软件的排除列表。
+- **没有代码签名** —— Windows SmartScreen 和 macOS Gatekeeper 都会对未签名的应用发出警告；目前属于预期情况。在 macOS 上将 Krab 拖入“应用程序”后，首次运行可能需要右键应用并选择“打开”，因为它尚未公证。在 Windows 上，杀毒软件（包括 Defender）有时会在 Krab 将 `wintun.dll` 写入自身旁边后立即将其隔离，因为这类与内核相关的网络 DLL 很容易被启发式检测标记——WireGuard、v2rayN 等基于 Wintun 的应用也会遇到同样的问题。如果 TUN 模式因类似“找不到文件”的错误而失败，请将 Krab 所在文件夹加入杀毒软件的排除列表。
 
 ## 贡献
 

@@ -34,13 +34,12 @@ Grab the latest build from the **[Releases page](https://github.com/krabt/krab/r
 | --- | --- |
 | Windows (x64) | `krab-windows-amd64.exe` |
 | Linux (x64) | `krab-linux-amd64` |
-| macOS (Apple Silicon) | `krab-macos-arm64` |
+| macOS (Apple Silicon) | `krab-macos-arm64.dmg` |
 
-Every platform ships as a single portable executable — no installer, no admin rights
-required (the macOS build is the raw binary pulled out of the `.app` bundle Wails 3 produces;
-see [Known gaps](#known-gaps--next-steps) for the Gatekeeper prompt this means, and how to
-get past it). Once installed, it checks for new releases on startup and can update itself
-in one click.
+Windows and Linux ship as portable executables; macOS ships as a DMG containing the Krab
+app bundle. No administrator rights are required for proxy mode. See
+[Known gaps](#known-gaps--next-steps) for unsigned-app warnings. Once installed, Krab
+checks for new releases on startup and can update itself in one click.
 
 ## Features
 
@@ -158,8 +157,8 @@ the frontend once `wails3 generate bindings` creates `frontend/bindings/github.c
   hides it to the tray, while minimizing keeps the normal platform behavior.
 - **No code-signing** — Windows SmartScreen and macOS Gatekeeper will both warn on an
   unsigned binary; this is expected for now. On macOS, running the downloaded binary the
-  first time needs `xattr -d com.apple.quarantine krab-macos-arm64` (or right-click →
-  Open) to get past Gatekeeper, since it isn't notarized. On Windows, antivirus software
+  first time may require right-clicking Krab in Applications and choosing **Open** to get
+  past Gatekeeper, since it isn't notarized. On Windows, antivirus software
   (including Defender) sometimes quarantines `wintun.dll` right after Krab writes it next
   to itself for TUN mode, since a kernel-adjacent networking DLL like this gets flagged
   heuristically — the same thing WireGuard, v2rayN, and other Wintun-based apps run into.

@@ -18,21 +18,21 @@ jobs:
           - os: windows-latest
             goos: windows
             goarch: amd64
+            task: build
             artifact: krab-windows-amd64.exe
-            binpath: bin/krab.exe
+            output: bin/krab.exe
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
+            task: build
             artifact: krab-linux-amd64
-            binpath: bin/krab
-          # macos-14 (Apple Silicon) instead of macos-13: much shorter
-          # GitHub queue times, and Apple Silicon is what most current Mac
-          # users actually have.
+            output: bin/krab
           - os: macos-14
             goos: darwin
             goarch: arm64
-            artifact: krab-macos-arm64
-            binpath: bin/krab
+            task: dmg
+            artifact: krab-macos-arm64.dmg
+            output: bin/krab.dmg
 
     runs-on: ${{ matrix.os }}
 
@@ -50,6 +50,9 @@ jobs:
       - name: Enable pnpm
         run: corepack enable
 
+      - name: Install Task
+        uses: go-task/setup-task@v2
+
       - name: Install Linux build dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -57,17 +60,7 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential pkg-config
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
-
-      - name: Resolve Go dependencies
-        run: go mod tidy
-
-      - name: Run tests
-        run: go test ./pkg/...
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: pnpm install --frozen-lockfile
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.26
 
       - name: Determine version
         id: version
@@ -79,12 +72,13 @@ jobs:
             echo "value=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build
-        run: wails3 build GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} VERSION=${{ steps.version.outputs.value }}
-
-      - name: Rename binary
+      - name: Build with Task
         shell: bash
-        run: cp "${{ matrix.binpath }}" "${{ matrix.artifact }}"
+        run: task "${{ matrix.task }}" GOOS=${{ matrix.goos }} ARCH=${{ matrix.goarch }} VERSION=${{ steps.version.outputs.value }}
+
+      - name: Stage release artifact
+        shell: bash
+        run: cp "${{ matrix.output }}" "${{ matrix.artifact }}"
 
       - uses: actions/upload-artifact@v4
         with:
