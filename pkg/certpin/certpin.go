@@ -1,5 +1,5 @@
-// Package certpin converts the legacy "ignore certificate verification"
-// option into the certificate pinning required by current xray-core releases.
+// Package certpin converts "ignore certificate verification" into the
+// certificate pinning required by current xray-core releases.
 package certpin
 
 import (

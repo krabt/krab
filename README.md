@@ -4,7 +4,9 @@
   # Krab
 
   **A cross-platform desktop V2Ray/proxy client.**
-  Wails + Go backend, React/Tailwind frontend, xray-core embedded as a Go library.
+  Wails 3 + Go backend, React/Tailwind frontend, xray-core embedded as a Go library.
+
+  Forked from [freeb5d/kite](https://github.com/freeb5d/kite).
 
   [![Release](https://img.shields.io/github/v/release/krabt/krab?label=release&color=6366f1)](https://github.com/krabt/krab/releases/latest)
   [![Build](https://img.shields.io/github/actions/workflow/status/krabt/krab/release.yml?label=build)](https://github.com/krabt/krab/actions/workflows/release.yml)
@@ -14,7 +16,7 @@
 
   [Download](#downloads) · [Features](#features) · [Building from source](#building-from-source) · [Architecture](#architecture)
 
-  English · [中文](README.zh.md) · [فارسی](README.fa.md) · [Türkçe](README.tr.md) · [العربية](README.ar.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Русский](README.ru.md)
+  English · [中文](README.zh.md)
 </div>
 
 <p align="center">
@@ -35,7 +37,7 @@ Grab the latest build from the **[Releases page](https://github.com/krabt/krab/r
 | macOS (Apple Silicon) | `krab-macos-arm64` |
 
 Every platform ships as a single portable executable — no installer, no admin rights
-required (the macOS build is the raw binary pulled out of the `.app` bundle Wails produces;
+required (the macOS build is the raw binary pulled out of the `.app` bundle Wails 3 produces;
 see [Known gaps](#known-gaps--next-steps) for the Gatekeeper prompt this means, and how to
 get past it). Once installed, it checks for new releases on startup and can update itself
 in one click.
@@ -46,34 +48,33 @@ in one click.
 - **Subscription URLs** — paste an `http(s)://` subscription link (the base64 link-list format used by V2RayN/V2RayNG/Shadowrocket) and every server it contains is imported at once, folded into one collapsible group in the list (subscriptions can carry hundreds of servers). The group shows plan/traffic/expiry info when the provider reports it (via the `Subscription-Userinfo` header, or the fake "info" entries some providers mix into the link list), and has its own buttons to sync, share (copy the subscription URL, or every server as a plain link list), edit (rename / change URL), and remove it. Besides the usual base64 link list, Clash/Mihomo YAML, sing-box JSON, Xray JSON and Shadowsocks SIP008 subscriptions are understood too, and subscriptions auto-sync on launch when the provider's `Profile-Update-Interval` has passed
 - **Share any server** — copies its standard `vless://` / `vmess://` / `trojan://` / `ss://`, `hysteria2://`, `ssh://` link for use in another client
 - **xray-core**, embedded as a Go library (not a shelled-out binary) — full lifecycle control and real traffic stats, no parsing stdout
-- **Transports**: TCP (including xray-core's `headerType=http` disguise), WebSocket, and gRPC, with TLS/REALITY security detection straight from the link
-- **System proxy integration** — Connect/Disconnect toggles the OS HTTP proxy automatically (per-user registry on Windows, no elevation needed)
+- **Transports**: TCP (including `headerType=http`), WebSocket, gRPC, mKCP, HTTPUpgrade, XHTTP and HTTP/2, with TLS, REALITY, ECH and certificate pinning
+- **Outbound routing rules** — attach independent block, proxy and direct rule groups to each server. Domain, IP/CIDR, `geosite:` and `geoip:` matches are supported, with deterministic priority: block first, proxy second, direct last
+- **System proxy integration** — separately configure HTTP, HTTPS and SOCKS5 endpoints, then explicitly apply or clear the OS proxy. Terminal proxy environment variables can be copied with one click
+- **GeoData and DNS settings** — manage `geoip.dat` / `geosite.dat`, custom hosts and upstream DNS servers from the UI
 - **TUN mode (Windows)** — routes all system traffic through a virtual network adapter (xray-core's TUN with the bundled WinTun driver), instead of just apps that honor a proxy setting. Works with every server type, including `headerType=http`. DNS goes through the tunnel too. Needs administrator privileges; Krab can relaunch itself elevated with one click
 - **Kill switch (Windows)** — blocks all outbound traffic except Krab's own while connected, by switching Windows Firewall's default outbound policy to block, so an app that ignores the system proxy (or a crashed xray process) can't leak traffic outside the tunnel. Same admin requirement as TUN mode
 - **System tray** — closing the window hides it to the tray instead of quitting, so an active connection keeps running; the tray menu has Show Krab, Disconnect, and Quit Krab
+- **Launch at login** — optional native startup registration on macOS, Linux and Windows
 - **Built-in diagnostics** — a Test button makes a real request through the tunnel and reports the actual result; a log viewer surfaces xray-core's own debug log inline
+- **Traffic history** — live upload/download counters plus persistent daily and per-server totals
 - **Self-updating** — checks GitHub Releases on launch, one click downloads, swaps, and relaunches (About panel shows both Krab's and the embedded xray-core's version)
 - **Dark / light themes**, with a searchable server list, inline rename, and one-click remove
-- **8 languages**, switchable from the sidebar (Persian uses the bundled Vazirmatn font):
+- **2 languages**, switchable from the sidebar:
   - 🇬🇧 English (default)
   - 🇨🇳 中文 (Chinese)
-  - 🇮🇷 فارسی (Persian)
-  - 🇹🇷 Türkçe (Turkish)
-  - 🇸🇦 العربية (Arabic)
-  - 🇫🇷 Français (French)
-  - 🇩🇪 Deutsch (German)
-  - 🇷🇺 Русский (Russian)
+- **SQLite persistence** — profiles, application settings, outbound rules and traffic history live in `~/.krab/krab.db`
 
 ## Building from source
 
 ### One-time toolchain setup
 
 1. **Go 1.27+** — https://go.dev/dl/. Windows also needs a C compiler for CGO
-   (Wails and some of its dependencies use it) — install
+   (Wails 3 and some of its dependencies use it) — install
    [TDM-GCC](https://jmeubank.github.io/tdm-gcc/) or `winget install -e --id GoLang.Go`
    plus MSYS2's `mingw-w64-x86_64-gcc`.
 2. **Node.js (LTS)** — https://nodejs.org, or `winget install OpenJS.NodeJS.LTS`.
-3. **Wails CLI**:
+3. **Wails 3 CLI**:
    ```bash
    go install github.com/wailsapp/wails/v3/cmd/wails3@latest
    wails3 doctor   # confirms platform dependencies (WebView2 etc.) are present
@@ -98,22 +99,22 @@ wails3 build
 
 ```
 krab/
-├── main.go / app.go        Wails entrypoint + the App struct (Go methods
+├── main.go / app.go        Wails 3 entrypoint + the App struct (Go methods
 │                            exposed to the frontend via the JS bridge)
 ├── internal/
+│   ├── database/             SQLite storage at ~/.krab/krab.db
 │   ├── xray/                 xray-core lifecycle
 │   │   ├── manager.go         Start/Stop a core.Instance (proxy or TUN mode),
 │   │   │                      traffic counters from xray's stats.Manager
 │   │   ├── config.go          Server profile -> xray-core JSON config
 │   │   └── tun_windows.go     Writes the embedded wintun.dll next to the
 │   │                          exe (TUN mode needs it alongside the binary)
-│   ├── profile/              vmess/vless/trojan/ss link parsing +
-│   │                         JSON-file server storage
-│   ├── system/                per-OS HTTP/SOCKS system proxy toggling +
-│   │   │                      TUN-mode support (Windows)
+│   ├── system/                per-OS HTTP/SOCKS system proxy toggling,
+│   │                          launch-at-login and TUN support (Windows)
 │   │   ├── proxy_windows.go   HKCU Internet Settings (no admin needed)
 │   │   ├── proxy_darwin.go    networksetup
 │   │   ├── proxy_linux.go     gsettings (GNOME)
+│   │   ├── autostart_*.go     native launch-at-login registration
 │   │   ├── elevate_windows.go Check/request administrator privileges
 │   │   ├── route_windows.go   Exception route so xray's own upstream
 │   │   │                      connection doesn't loop through the TUN
@@ -122,8 +123,14 @@ krab/
 │   │                          see WINTUN_LICENSE.txt in that directory)
 │   └── update/                self-update: check GitHub Releases, download
 │                               + swap the running executable, relaunch
+├── pkg/
+│   ├── profile/               Profile models, parsing and SQLite storage
+│   ├── xrayconf/              Shared xray-core configuration builder
+│   ├── certpin/               TLS certificate pin resolution
+│   ├── probe/                 TCP, HTTP and real-delay checks
+│   └── sshbridge/             Local SOCKS-to-SSH bridge
 ├── frontend/                 Vite + React + Tailwind (CSS-variable theming
-│                              for dark/light), talks to app.go via Wails
+│                              for dark/light), talks to app.go via Wails 3
 └── .github/workflows/         CI: builds + publishes GitHub Releases on
     release.yml                 any pushed `v*` tag
 ```
@@ -147,10 +154,8 @@ the frontend once `wails3 generate bindings` creates `frontend/bindings/github.c
   (`internal/system/killswitch_windows.go`); Linux/macOS need their own backend
   (`iptables`/`pfctl`) and are unimplemented for now (the toggle is hidden there,
   same as TUN mode).
-- **The native minimize button still just minimizes to the taskbar** — Wails v2 doesn't
-  expose a hook for the OS-level minimize event, only window close (`OnBeforeClose`,
-  which the tray feature uses). Only closing the window hides it to the tray.
-- **No automated tests yet.**
+- **The native minimize button still just minimizes to the taskbar** — closing the window
+  hides it to the tray, while minimizing keeps the normal platform behavior.
 - **No code-signing** — Windows SmartScreen and macOS Gatekeeper will both warn on an
   unsigned binary; this is expected for now. On macOS, running the downloaded binary the
   first time needs `xattr -d com.apple.quarantine krab-macos-arm64` (or right-click →

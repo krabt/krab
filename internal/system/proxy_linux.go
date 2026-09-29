@@ -8,12 +8,6 @@ import (
 	"strings"
 )
 
-// SetProxy uses gsettings, which covers GNOME and most GTK-based desktops.
-// Other desktop environments (KDE, etc.) will need their own backend later.
-func SetProxy(host string, httpPort, socksPort int) error {
-	return SetProxyConfig(ProxyConfig{host, httpPort, host, httpPort, host, socksPort})
-}
-
 func SetProxyConfig(config ProxyConfig) error {
 	proxies := map[string]struct {
 		host string
@@ -35,10 +29,6 @@ func SetProxyConfig(config ProxyConfig) error {
 
 func ClearProxy() error {
 	return exec.Command("gsettings", "set", "org.gnome.system.proxy", "mode", "none").Run()
-}
-
-func ClearStaleProxy(host string, port int) error {
-	return nil
 }
 
 func GetProxyStatus() (ProxyStatus, error) {

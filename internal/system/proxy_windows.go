@@ -17,35 +17,6 @@ const internetSettingsPath = `Software\Microsoft\Windows\CurrentVersion\Internet
 // NAS, printers) off the proxy; "<local>" alone only covers dotless names.
 const proxyBypass = "localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*;<local>"
 
-// ClearStaleProxy turns the system proxy off only if it still points at
-// host:port -- i.e. Krab set it and then exited without cleaning up (crash,
-// killed process). A proxy the user configured themselves is left alone.
-func ClearStaleProxy(host string, port int) error {
-	key, err := registry.OpenKey(registry.CURRENT_USER, internetSettingsPath, registry.QUERY_VALUE)
-	if err != nil {
-		return err
-	}
-	enabled, _, _ := key.GetIntegerValue("ProxyEnable")
-	server, _, _ := key.GetStringValue("ProxyServer")
-	key.Close()
-
-	if enabled == 1 && server == fmt.Sprintf("%s:%d", host, port) {
-		return ClearProxy()
-	}
-	return nil
-}
-
-// SetProxy writes the per-user Internet Settings registry keys that
-// browsers and most Windows apps read for their proxy configuration.
-// This intentionally does NOT use `netsh winhttp set proxy`: that command
-// requires an elevated (admin) process, and it only affects WinHTTP-based
-// services (e.g. Windows Update), not the browsers users actually care
-// about — HKCU Internet Settings is what those honor, and it needs no
-// elevation since it's a per-user key.
-func SetProxy(host string, port, socksPort int) error {
-	return SetProxyConfig(ProxyConfig{host, port, host, port, host, socksPort})
-}
-
 func SetProxyConfig(config ProxyConfig) error {
 	key, err := registry.OpenKey(registry.CURRENT_USER, internetSettingsPath, registry.SET_VALUE)
 	if err != nil {

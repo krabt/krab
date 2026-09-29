@@ -29,10 +29,6 @@ func networkServices() ([]string, error) {
 	return services, nil
 }
 
-func SetProxy(host string, httpPort, socksPort int) error {
-	return SetProxyConfig(ProxyConfig{host, httpPort, host, httpPort, host, socksPort})
-}
-
 func SetProxyConfig(config ProxyConfig) error {
 	services, err := networkServices()
 	if err != nil {
@@ -62,10 +58,6 @@ func ClearProxy() error {
 			_ = exec.Command("networksetup", flag, svc, "off").Run()
 		}
 	}
-	return nil
-}
-
-func ClearStaleProxy(host string, port int) error {
 	return nil
 }
 

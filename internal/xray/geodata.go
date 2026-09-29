@@ -20,25 +20,10 @@ type GeoSettings struct {
 	UI         map[string]any    `json:"ui,omitempty"`
 }
 
-func legacyGeoSettingsPath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = "."
-	}
-	return filepath.Join(dir, "kite", "geo-settings.json")
-}
-
 func LoadGeoSettings() GeoSettings {
 	data, found, err := database.Get("xray_settings")
-	if err != nil {
+	if err != nil || !found {
 		return normalizeGeoSettings(GeoSettings{})
-	}
-	if !found {
-		data, err = os.ReadFile(legacyGeoSettingsPath())
-		if err != nil {
-			return normalizeGeoSettings(GeoSettings{})
-		}
-		_ = database.Set("xray_settings", data)
 	}
 	var settings GeoSettings
 	_ = json.Unmarshal(data, &settings)

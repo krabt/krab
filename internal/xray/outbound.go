@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/krabt/krab/internal/database"
@@ -37,25 +35,10 @@ func DefaultOutboundSettings() OutboundSettings {
 	}}}
 }
 
-func legacyOutboundSettingsPath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = "."
-	}
-	return filepath.Join(dir, "kite", "outbound-settings.json")
-}
-
 func LoadOutboundSettings() OutboundSettings {
 	data, found, err := database.Get("outbound_settings")
-	if err != nil {
+	if err != nil || !found {
 		return DefaultOutboundSettings()
-	}
-	if !found {
-		data, err = os.ReadFile(legacyOutboundSettingsPath())
-		if err != nil {
-			return DefaultOutboundSettings()
-		}
-		_ = database.Set("outbound_settings", data)
 	}
 	var settings OutboundSettings
 	if json.Unmarshal(data, &settings) != nil {

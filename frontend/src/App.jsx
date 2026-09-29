@@ -140,10 +140,6 @@ function proxyEndpointSummary(config) {
     : `HTTP ${http} · HTTPS ${https} · SOCKS5 ${socks}`
 }
 
-function migratedLocalSetting(name) {
-  return localStorage.getItem(`krab-${name}`) ?? localStorage.getItem(`kite-${name}`)
-}
-
 function StatusDot({ state }) {
   const color =
     state === 'running' ? 'bg-emerald-400' : state === 'starting' ? 'bg-amber-400' : state === 'error' ? 'bg-red-400' : 'bg-neutral-600'
@@ -499,13 +495,7 @@ export default function App() {
   const [aboutOpen, setAboutOpen] = useState(false)
   const [page, setPage] = useState('servers')
   const persistedSettings = useRef(null)
-  const [theme, setTheme] = useState(() => {
-    try {
-      return migratedLocalSetting('theme') || 'dark'
-    } catch {
-      return 'dark'
-    }
-  })
+  const [theme, setTheme] = useState('dark')
   const [updateInfo, setUpdateInfo] = useState(null)
   const [updateDismissed, setUpdateDismissed] = useState(false)
   const [updating, setUpdating] = useState(false)
@@ -513,17 +503,7 @@ export default function App() {
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [updateProgress, setUpdateProgress] = useState(null)
   const [mode, setMode] = useState('proxy')
-  const [proxyConfig, setProxyConfig] = useState(() => {
-    try {
-      const saved = { ...defaultProxyConfig, ...JSON.parse(migratedLocalSetting('system-proxy') || '{}') }
-      if (saved.httpPort === 2080) saved.httpPort = 5889
-      if (saved.httpsPort === 2080) saved.httpsPort = 5889
-      if (saved.socksPort === 2081) saved.socksPort = 5888
-      return saved
-    } catch {
-      return defaultProxyConfig
-    }
-  })
+  const [proxyConfig, setProxyConfig] = useState(defaultProxyConfig)
   const [proxyAction, setProxyAction] = useState({ busy: false, message: '' })
   const [proxyStatus, setProxyStatus] = useState({ known: false, enabled: false, config: {} })
   const [outboundRules, setOutboundRules] = useState([])
@@ -531,21 +511,8 @@ export default function App() {
   const ruleSelectorRef = useRef(null)
   const [platform, setPlatform] = useState('')
   const [elevated, setElevated] = useState(true)
-  const [killSwitch, setKillSwitch] = useState(() => {
-    try {
-      return migratedLocalSetting('killswitch') === '1'
-    } catch {
-      return false
-    }
-  })
-  const [lang, setLang] = useState(() => {
-    try {
-      const saved = migratedLocalSetting('lang')
-      return saved === 'zh' || saved === 'en' ? saved : 'en'
-    } catch {
-      return 'en'
-    }
-  })
+  const [killSwitch, setKillSwitch] = useState(false)
+  const [lang, setLang] = useState('en')
   const [langOpen, setLangOpen] = useState(false)
   const t = useMemo(() => makeT(lang), [lang])
 
@@ -636,30 +603,12 @@ export default function App() {
     )
   }, [servers, query])
 
-  const [pingMode, setPingMode] = useState(() => {
-    try {
-      return migratedLocalSetting('ping-mode') || 'tcp'
-    } catch {
-      return 'tcp'
-    }
-  })
+  const [pingMode, setPingMode] = useState('tcp')
   // id -> ms | -1 (failed) | null (running). Remembered across restarts,
   // like v2rayNG, until the next test.
-  const [pings, setPings] = useState(() => (() => {
-    try {
-      return JSON.parse(migratedLocalSetting('pings')) ?? {}
-    } catch {
-      return {}
-    }
-  })())
+  const [pings, setPings] = useState({})
   const [pinging, setPinging] = useState(false)
-  const [sortByDelay, setSortByDelay] = useState(() => (() => {
-    try {
-      return JSON.parse(migratedLocalSetting('sort-delay')) ?? false
-    } catch {
-      return false
-    }
-  })())
+  const [sortByDelay, setSortByDelay] = useState(false)
   const [pingMenuOpen, setPingMenuOpen] = useState(false)
   const cancelPing = useRef(false)
 
@@ -674,13 +623,13 @@ export default function App() {
       if (typeof ui.sortByDelay === 'boolean') setSortByDelay(ui.sortByDelay)
       if (ui.pingMode) setPingMode(ui.pingMode)
       if (ui.selectedServerId) setSelectedId(ui.selectedServerId)
-      const migrated = {
+      const hydrated = {
         theme: ui.theme || theme, lang: ui.lang || lang,
         killSwitch: ui.killSwitch ?? killSwitch, proxyConfig: ui.proxyConfig || proxyConfig,
         pings: ui.pings || pings, sortByDelay: ui.sortByDelay ?? sortByDelay,
         pingMode: ui.pingMode || pingMode, selectedServerId: ui.selectedServerId || selectedId,
       }
-      persistedSettings.current = { ...settings, ui: migrated }
+      persistedSettings.current = { ...settings, ui: hydrated }
       SaveGeoSettings(persistedSettings.current).catch(() => { })
     }).catch(() => { })
   }, [])

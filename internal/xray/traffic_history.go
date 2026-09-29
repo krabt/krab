@@ -49,7 +49,7 @@ func NewTrafficHistoryStore() *TrafficHistoryStore {
 	if err != nil {
 		dir = "."
 	}
-	store := &TrafficHistoryStore{path: filepath.Join(dir, "kite", "traffic-history.json")}
+	store := &TrafficHistoryStore{path: filepath.Join(dir, "krab", "traffic-history.json")}
 	store.data.Daily = map[string]TrafficTotals{}
 	store.data.Servers = map[string]ServerTraffic{}
 	if data, found, err := database.Get("traffic_history"); err == nil && found {

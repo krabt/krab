@@ -14,7 +14,6 @@ import (
 
 // Options selects what the generated config listens on.
 type Options struct {
-	HTTPPort  int    // legacy single local HTTP proxy port; 0 = no HTTP inbound
 	HTTPPorts []int  // local HTTP proxy ports; duplicates are ignored
 	SOCKSPort int    // local SOCKS5 proxy port; 0 = no SOCKS inbound
 	TUN       bool   // add xray's TUN inbound
@@ -64,9 +63,9 @@ func Build(server profile.Server, o Options) ([]byte, error) {
 	}
 
 	inbounds := []map[string]interface{}{}
-	httpPorts := make([]int, 0, len(o.HTTPPorts)+1)
+	httpPorts := make([]int, 0, len(o.HTTPPorts))
 	seenHTTPPorts := map[int]struct{}{}
-	for _, port := range append([]int{o.HTTPPort}, o.HTTPPorts...) {
+	for _, port := range o.HTTPPorts {
 		if port <= 0 {
 			continue
 		}

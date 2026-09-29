@@ -19,10 +19,7 @@ var assets embed.FS
 //go:embed build/appicon.png
 var trayIconPNG []byte
 
-const (
-	relaunchWaitFlag       = "--krab-relaunch-wait"
-	legacyRelaunchWaitFlag = "--kite-relaunch-wait"
-)
+const relaunchWaitFlag = "--krab-relaunch-wait"
 
 var singleInstanceKey = [32]byte{
 	0x6b, 0x69, 0x74, 0x65, 0xa1, 0x5e, 0x9f, 0x0a,
@@ -37,7 +34,7 @@ func init() {
 }
 
 func main() {
-	if slices.Contains(os.Args[1:], relaunchWaitFlag) || slices.Contains(os.Args[1:], legacyRelaunchWaitFlag) {
+	if slices.Contains(os.Args[1:], relaunchWaitFlag) {
 		time.Sleep(3 * time.Second)
 	}
 

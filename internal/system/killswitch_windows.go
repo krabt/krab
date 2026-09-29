@@ -12,12 +12,6 @@ const (
 	killSwitchAllowKrab = "Krab Kill Switch Allow"
 	killSwitchAllowTUN  = "Krab Kill Switch Allow TUN"
 	killSwitchAllowDNS  = "Krab Kill Switch Allow DNS"
-	// Rule name used by versions before the policy-based kill switch;
-	// still removed on disable so an upgrade can't leave it behind.
-	legacyKillSwitchBlock     = "Kite Kill Switch Block"
-	legacyKillSwitchAllowKite = "Kite Kill Switch Allow"
-	legacyKillSwitchAllowTUN  = "Kite Kill Switch Allow TUN"
-	legacyKillSwitchAllowDNS  = "Kite Kill Switch Allow DNS"
 
 	// Must cover the addresses Krab gives its TUN adapters
 	// (internal/xray TUNAddress) -- traffic other apps send into the
@@ -70,7 +64,6 @@ func DisableKillSwitch() error {
 	policyErr := netsh("advfirewall", "set", "allprofiles", "firewallpolicy", "blockinbound,allowoutbound")
 	for _, name := range []string{
 		killSwitchAllowKrab, killSwitchAllowTUN, killSwitchAllowDNS,
-		legacyKillSwitchBlock, legacyKillSwitchAllowKite, legacyKillSwitchAllowTUN, legacyKillSwitchAllowDNS,
 	} {
 		_ = removeFirewallRule(name)
 	}

@@ -3,29 +3,17 @@ package profile
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/google/uuid"
 	"github.com/krabt/krab/internal/database"
 )
 
-// Store persists the server list in the shared SQLite database. legacyPath
-// is retained only for one-time migration from earlier JSON-based releases.
 type Store struct {
-	mu         sync.Mutex
-	legacyPath string
+	mu sync.Mutex
 }
 
-func NewStore() *Store {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = "."
-	}
-	legacyKiteDir := filepath.Join(dir, "kite")
-	return &Store{legacyPath: filepath.Join(legacyKiteDir, "servers.json")}
-}
+func NewStore() *Store { return &Store{} }
 
 func (s *Store) List() ([]Server, error) {
 	s.mu.Lock()
@@ -164,34 +152,12 @@ func (s *Store) readAll() ([]Server, error) {
 		return nil, err
 	}
 	if !found {
-		data, err = os.ReadFile(s.legacyPath)
-		if os.IsNotExist(err) {
-			return []Server{}, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		if err := database.Set("profiles", data); err != nil {
-			return nil, err
-		}
+		return []Server{}, nil
 	}
 
 	var servers []Server
 	if err := json.Unmarshal(data, &servers); err != nil {
 		return nil, fmt.Errorf("corrupt server list: %w", err)
-	}
-
-	healed := false
-	for i, srv := range servers {
-		if srv.ID == "" {
-			servers[i].ID = uuid.NewString()
-			healed = true
-		}
-	}
-	if healed {
-		if err := s.writeAll(servers); err != nil {
-			return nil, err
-		}
 	}
 
 	return servers, nil
