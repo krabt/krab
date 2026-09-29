@@ -21,7 +21,7 @@ jobs:
             task: build
             artifact: krab-windows-amd64.exe
             output: bin/krab.exe
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             goos: linux
             goarch: amd64
             task: build
@@ -54,10 +54,11 @@ jobs:
         uses: go-task/setup-task@v2
 
       - name: Install Linux build dependencies
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.goos == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential pkg-config
+          sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev build-essential pkg-config
+          pkg-config --exists gtk4 webkitgtk-6.0
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.26

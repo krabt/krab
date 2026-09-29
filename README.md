@@ -78,6 +78,10 @@ checks for new releases on startup and can update itself in one click.
    go install github.com/wailsapp/wails/v3/cmd/wails3@latest
    wails3 doctor   # confirms platform dependencies (WebView2 etc.) are present
    ```
+4. **Linux desktop libraries** (Ubuntu 24.04):
+   ```bash
+   sudo apt-get install libgtk-4-dev libwebkitgtk-6.0-dev build-essential pkg-config
+   ```
 
 ### Run it
 

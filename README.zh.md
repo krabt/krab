@@ -72,6 +72,10 @@ Windows 和 Linux 提供便携可执行文件，macOS 提供包含 Krab 应用�
    go install github.com/wailsapp/wails/v3/cmd/wails3@latest
    wails3 doctor
    ```
+4. **Linux 桌面依赖**（Ubuntu 24.04）：
+   ```bash
+   sudo apt-get install libgtk-4-dev libwebkitgtk-6.0-dev build-essential pkg-config
+   ```
 
 ### 运行
 
