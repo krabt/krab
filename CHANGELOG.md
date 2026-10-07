@@ -3,6 +3,11 @@
 All notable changes to Krab are documented here. Versions correspond to
 [GitHub Releases](https://github.com/krabt/krab/releases).
 
+
+## 🚀 v0.19.1 — Add traffic stats
+- **Traffic dashboard**: inbound && outbound
+
+
 ## 🚀 v0.19.0 — Wails v3
 -- **wails v3**: update to wails v3.
 -- **outbound rule**: support outbound rule.
