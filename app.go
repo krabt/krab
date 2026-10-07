@@ -127,12 +127,47 @@ func (a *App) ListProfiles() ([]profile.Server, error) {
 	return a.store.List()
 }
 
+func (a *App) refreshTrayServers() {
+	servers, err := a.store.List()
+	if err != nil {
+		return
+	}
+	choices := make([]tray.ServerChoice, 0, len(servers))
+	for _, server := range servers {
+		choices = append(choices, tray.ServerChoice{ID: server.ID, Name: server.Name})
+	}
+	tray.SetServers(choices)
+	if a.wails != nil {
+		a.wails.Event.Emit("profiles:changed", servers)
+	}
+}
+
+func (a *App) emitConnectionChanged() {
+	if a.wails != nil && a.manager != nil {
+		a.wails.Event.Emit("connection:changed", a.manager.Status())
+	}
+}
+
+func (a *App) emitSystemProxyChanged() {
+	if a.wails == nil {
+		return
+	}
+	status, err := system.GetProxyStatus()
+	if err == nil {
+		a.wails.Event.Emit("system-proxy:changed", status)
+	}
+}
+
 func (a *App) AddProfileFromLink(link string) (profile.Server, error) {
 	server, err := profile.ParseLink(link)
 	if err != nil {
 		return profile.Server{}, err
 	}
-	return a.store.Add(server)
+	server, err = a.store.Add(server)
+	if err == nil {
+		a.refreshTrayServers()
+	}
+	return server, err
 }
 
 // AddSubscription fetches a subscription URL (the standard V2RayN/
@@ -173,6 +208,9 @@ func (a *App) RefreshSubscription(groupID string) ([]profile.Server, error) {
 // the same subscription (same extra.subGroup id).
 func (a *App) DeleteSubscriptionGroup(groupID string) error {
 	_, err := a.store.ReplaceWhere(inGroup(groupID), nil)
+	if err == nil {
+		a.refreshTrayServers()
+	}
 	return err
 }
 
@@ -193,6 +231,9 @@ func (a *App) EditSubscription(groupID, name, subURL string) error {
 	if err == nil && n == 0 {
 		err = fmt.Errorf("subscription group not found")
 	}
+	if err == nil {
+		a.refreshTrayServers()
+	}
 	return err
 }
 
@@ -211,9 +252,17 @@ func (a *App) SaveProfile(server profile.Server) (profile.Server, error) {
 		server.Name = server.Address
 	}
 	if server.ID == "" {
-		return a.store.Add(server)
+		saved, err := a.store.Add(server)
+		if err == nil {
+			a.refreshTrayServers()
+		}
+		return saved, err
 	}
-	return server, a.store.Update(server)
+	err := a.store.Update(server)
+	if err == nil {
+		a.refreshTrayServers()
+	}
+	return server, err
 }
 
 // PingServer measures a server's delay in ms. mode is "tcp", "http" or
@@ -351,11 +400,19 @@ func (a *App) importSubscription(subURL, groupID string) ([]profile.Server, erro
 			parsed[i].Extra["subNotes"] = subNotes
 		}
 	}
-	return a.store.ReplaceWhere(inGroup(groupID), parsed)
+	servers, err := a.store.ReplaceWhere(inGroup(groupID), parsed)
+	if err == nil {
+		a.refreshTrayServers()
+	}
+	return servers, err
 }
 
 func (a *App) DeleteProfile(id string) error {
-	return a.store.Delete(id)
+	err := a.store.Delete(id)
+	if err == nil {
+		a.refreshTrayServers()
+	}
+	return err
 }
 
 func (a *App) RenameProfile(id string, name string) (profile.Server, error) {
@@ -367,6 +424,7 @@ func (a *App) RenameProfile(id string, name string) (profile.Server, error) {
 	if err := a.store.Update(server); err != nil {
 		return profile.Server{}, err
 	}
+	a.refreshTrayServers()
 	return server, nil
 }
 
@@ -407,18 +465,28 @@ func (a *App) Connect(serverID string, mode string, killSwitch bool) error {
 	}
 
 	if err := a.manager.Start(server, xrayMode); err != nil {
+		a.emitConnectionChanged()
 		return err
 	}
 
 	if killSwitch {
 		if err := system.EnableKillSwitch(); err != nil {
 			_ = a.manager.Stop()
+			a.emitConnectionChanged()
 			return fmt.Errorf("enable kill switch: %w", err)
 		}
 	}
 	a.startTrafficTracking(server)
 	a.killSwitchOn = killSwitch
+	settings := xray.LoadGeoSettings()
+	if settings.UI == nil {
+		settings.UI = make(map[string]interface{})
+	}
+	settings.UI["lastConnectedServerId"] = server.ID
+	settings.UI["selectedServerId"] = server.ID
+	_ = xray.SaveGeoSettings(settings)
 	tray.SetConnected(true)
+	a.emitConnectionChanged()
 	return nil
 }
 
@@ -428,8 +496,10 @@ func (a *App) Disconnect() error {
 		_ = system.DisableKillSwitch()
 		a.killSwitchOn = false
 	}
+	err := a.manager.Stop()
 	tray.SetConnected(false)
-	return a.manager.Stop()
+	a.emitConnectionChanged()
+	return err
 }
 
 // SetSystemProxy applies proxy settings only on explicit user request.
@@ -441,7 +511,9 @@ func (a *App) SetSystemProxy(config system.ProxyConfig) error {
 		return err
 	}
 	tray.SetProxyEnabled(true)
-	return a.saveSystemProxyConfig(config)
+	err := a.saveSystemProxyConfig(config)
+	a.emitSystemProxyChanged()
+	return err
 }
 
 // SaveSystemProxyConfig persists the ports used by the next Xray connection
@@ -480,6 +552,7 @@ func (a *App) ClearSystemProxy() error {
 		return err
 	}
 	tray.SetProxyEnabled(false)
+	a.emitSystemProxyChanged()
 	return nil
 }
 
@@ -605,14 +678,21 @@ func (a *App) startTrafficTracking(server profile.Server) {
 		defer saveTicker.Stop()
 		record := func() {
 			current := a.manager.Traffic()
-			uplink, downlink := current.Uplink-last.Uplink, current.Downlink-last.Downlink
-			if uplink < 0 {
-				uplink = 0
+			proxy := xray.TrafficTotals{Uplink: current.Proxy.Uplink - last.Proxy.Uplink, Downlink: current.Proxy.Downlink - last.Proxy.Downlink}
+			direct := xray.TrafficTotals{Uplink: current.Direct.Uplink - last.Direct.Uplink, Downlink: current.Direct.Downlink - last.Direct.Downlink}
+			if proxy.Uplink < 0 {
+				proxy.Uplink = 0
 			}
-			if downlink < 0 {
-				downlink = 0
+			if proxy.Downlink < 0 {
+				proxy.Downlink = 0
 			}
-			a.trafficStore.Record(server.ID, server.Name, uplink, downlink, time.Now())
+			if direct.Uplink < 0 {
+				direct.Uplink = 0
+			}
+			if direct.Downlink < 0 {
+				direct.Downlink = 0
+			}
+			a.trafficStore.RecordOutbound(server.ID, server.Name, proxy, direct, time.Now())
 			last = current
 		}
 		for {

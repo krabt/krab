@@ -9,15 +9,17 @@ import (
 )
 
 var (
-	connectItem      *application.MenuItem
-	disconnectItem   *application.MenuItem
-	statusItem       *application.MenuItem
-	systemTray       *application.SystemTray
-	serverItems      = map[string]serverMenuItem{}
-	selectedID       string
-	serviceConnected bool
-	proxyEnabled     bool
-	mu               sync.Mutex
+	serviceToggleItem *application.MenuItem
+	statusItem        *application.MenuItem
+	proxyToggleItem   *application.MenuItem
+	systemTray        *application.SystemTray
+	serverMenu        *application.Menu
+	selectServer      func(string)
+	serverItems       = map[string]serverMenuItem{}
+	selectedID        string
+	serviceConnected  bool
+	proxyEnabled      bool
+	mu                sync.Mutex
 )
 
 type ServerChoice struct{ ID, Name string }
@@ -41,39 +43,35 @@ func SetupSystemTray(app *application.App, iconPNG []byte, servers []ServerChoic
 	statusItem = menu.Add(" ").SetTooltip(statusTooltip(false, initialProxyEnabled))
 	statusItem.SetBitmap(statusBitmap(false, initialProxyEnabled))
 	menu.AddSeparator()
-	serverMenu := menu.AddSubmenu("选择服务器")
-	if len(servers) == 0 {
-		serverMenu.Add("暂无服务器").SetEnabled(false)
-	}
-	for _, server := range servers {
-		choice := server
-		label := choice.Name
-		if choice.ID == initialServerID {
-			label += " *"
-		}
-		item := serverMenu.Add(label)
-		item.OnClick(func(*application.Context) {
-			SetSelectedServer(choice.ID)
-			onSelectServer(choice.ID)
-		})
-		serverItems[choice.ID] = serverMenuItem{name: choice.Name, item: item}
-	}
+	serverMenu = menu.AddSubmenu("选择服务器")
+	selectServer = onSelectServer
+	rebuildServerMenuLocked(servers)
 	menu.AddSeparator()
-	connectItem = menu.Add("连接服务")
-	connectItem.SetEnabled(initialServerID != "")
-	connectItem.OnClick(func(*application.Context) {
+	serviceToggleItem = menu.Add(serviceToggleLabel(false))
+	serviceToggleItem.SetEnabled(initialServerID != "")
+	serviceToggleItem.OnClick(func(*application.Context) {
 		mu.Lock()
 		id := selectedID
+		connected := serviceConnected
 		mu.Unlock()
-		if id != "" {
+		if connected {
+			onDisconnect()
+		} else if id != "" {
 			onConnect(id)
 		}
 	})
-	disconnectItem = menu.Add("断开服务").SetEnabled(false)
-	disconnectItem.OnClick(func(*application.Context) { onDisconnect() })
 	menu.AddSeparator()
-	menu.Add("设置代理").OnClick(func(*application.Context) { onSetProxy() })
-	menu.Add("取消代理").OnClick(func(*application.Context) { onClearProxy() })
+	proxyToggleItem = menu.Add(proxyToggleLabel(initialProxyEnabled))
+	proxyToggleItem.OnClick(func(*application.Context) {
+		mu.Lock()
+		enabled := proxyEnabled
+		mu.Unlock()
+		if enabled {
+			onClearProxy()
+		} else {
+			onSetProxy()
+		}
+	})
 	menu.Add("复制代理命令").OnClick(func(*application.Context) { onCopyProxy() })
 	menu.AddSeparator()
 
@@ -90,6 +88,59 @@ func SetupSystemTray(app *application.App, iconPNG []byte, servers []ServerChoic
 	return systemTray
 }
 
+// SetServers rebuilds the server submenu from the current profile store.
+// It keeps a valid selection when possible and falls back to the first server.
+func SetServers(servers []ServerChoice) {
+	mu.Lock()
+	defer mu.Unlock()
+	if serverMenu == nil {
+		return
+	}
+
+	selectionExists := false
+	for _, server := range servers {
+		if server.ID == selectedID {
+			selectionExists = true
+			break
+		}
+	}
+	if !selectionExists {
+		selectedID = ""
+		if len(servers) > 0 {
+			selectedID = servers[0].ID
+		}
+	}
+	rebuildServerMenuLocked(servers)
+	serverMenu.Update()
+	if serviceToggleItem != nil {
+		serviceToggleItem.SetEnabled(serviceConnected || selectedID != "")
+	}
+}
+
+func rebuildServerMenuLocked(servers []ServerChoice) {
+	serverMenu.Clear()
+	serverItems = make(map[string]serverMenuItem, len(servers))
+	if len(servers) == 0 {
+		serverMenu.Add("暂无服务器").SetEnabled(false)
+		return
+	}
+	for _, server := range servers {
+		choice := server
+		label := choice.Name
+		if choice.ID == selectedID {
+			label += " *"
+		}
+		item := serverMenu.Add(label)
+		item.OnClick(func(*application.Context) {
+			SetSelectedServer(choice.ID)
+			if selectServer != nil {
+				selectServer(choice.ID)
+			}
+		})
+		serverItems[choice.ID] = serverMenuItem{name: choice.Name, item: item}
+	}
+}
+
 func statusTooltip(connected, proxyEnabled bool) string {
 	serviceText, proxyText := "服务未连接", "代理已关闭"
 	if connected {
@@ -99,6 +150,20 @@ func statusTooltip(connected, proxyEnabled bool) string {
 		proxyText = "代理已开启"
 	}
 	return serviceText + " · " + proxyText
+}
+
+func proxyToggleLabel(enabled bool) string {
+	if enabled {
+		return "取消代理"
+	}
+	return "设置代理"
+}
+
+func serviceToggleLabel(connected bool) string {
+	if connected {
+		return "断开服务"
+	}
+	return "连接服务"
 }
 
 func statusBitmap(connected, proxyEnabled bool) []byte {
@@ -142,8 +207,8 @@ func SetSelectedServer(id string) {
 		}
 		entry.item.SetLabel(label)
 	}
-	if connectItem != nil {
-		connectItem.SetEnabled(id != "")
+	if serviceToggleItem != nil {
+		serviceToggleItem.SetEnabled(serviceConnected || id != "")
 	}
 }
 
@@ -157,11 +222,9 @@ func SetConnected(connected bool) {
 		statusItem.SetBitmap(statusBitmap(connected, proxyEnabled))
 		statusItem.SetTooltip(statusTooltip(connected, proxyEnabled))
 	}
-	if connectItem != nil {
-		connectItem.SetEnabled(!connected && selectedID != "")
-	}
-	if disconnectItem != nil {
-		disconnectItem.SetEnabled(connected)
+	if serviceToggleItem != nil {
+		serviceToggleItem.SetLabel(serviceToggleLabel(connected))
+		serviceToggleItem.SetEnabled(connected || selectedID != "")
 	}
 	refreshTooltipLocked()
 }
@@ -171,6 +234,9 @@ func SetProxyEnabled(enabled bool) {
 	mu.Lock()
 	defer mu.Unlock()
 	proxyEnabled = enabled
+	if proxyToggleItem != nil {
+		proxyToggleItem.SetLabel(proxyToggleLabel(enabled))
+	}
 	if statusItem != nil {
 		statusItem.SetBitmap(statusBitmap(serviceConnected, enabled))
 		statusItem.SetTooltip(statusTooltip(serviceConnected, enabled))

@@ -34,33 +34,38 @@ const (
 )
 
 type Status struct {
-	State   State  `json:"state"`
-	Server  string `json:"server,omitempty"`
-	Mode    Mode   `json:"mode,omitempty"`
-	Message string `json:"message,omitempty"`
+	State    State  `json:"state"`
+	ServerID string `json:"serverId,omitempty"`
+	Server   string `json:"server,omitempty"`
+	Mode     Mode   `json:"mode,omitempty"`
+	Message  string `json:"message,omitempty"`
 }
 
 type Traffic struct {
 	Uplink   int64           `json:"uplink"`
 	Downlink int64           `json:"downlink"`
+	Proxy    TrafficTotals   `json:"proxy"`
+	Direct   TrafficTotals   `json:"direct"`
 	History  *TrafficHistory `json:"history,omitempty"`
 }
 
 // Manager owns the lifecycle of a single running xray-core instance.
 type Manager struct {
-	mu               sync.Mutex
-	status           Status
-	instance         *core.Instance
-	exceptionRoutes  []string
-	tunAddr          string
-	tunSeq           int
-	uplinkCounter    stats.Counter
-	downlinkCounter  stats.Counter
-	sshBridge        *sshbridge.Bridge
-	geoSettings      GeoSettings
-	outboundSettings OutboundSettings
-	httpPorts        []int
-	socksPort        int
+	mu                    sync.Mutex
+	status                Status
+	instance              *core.Instance
+	exceptionRoutes       []string
+	tunAddr               string
+	tunSeq                int
+	uplinkCounter         stats.Counter
+	downlinkCounter       stats.Counter
+	directUplinkCounter   stats.Counter
+	directDownlinkCounter stats.Counter
+	sshBridge             *sshbridge.Bridge
+	geoSettings           GeoSettings
+	outboundSettings      OutboundSettings
+	httpPorts             []int
+	socksPort             int
 }
 
 func NewManager() *Manager {
@@ -103,7 +108,7 @@ func (m *Manager) Start(server profile.Server, mode Mode) error {
 		m.status = Status{State: StateError, Message: err.Error()}
 		return err
 	}
-	m.status = Status{State: StateRunning, Server: server.Name, Mode: mode}
+	m.status = Status{State: StateRunning, ServerID: server.ID, Server: server.Name, Mode: mode}
 	return nil
 }
 
@@ -233,9 +238,12 @@ func (m *Manager) start(server profile.Server, mode Mode) error {
 	m.instance = instance
 	started = true
 	m.uplinkCounter, m.downlinkCounter = nil, nil
+	m.directUplinkCounter, m.directDownlinkCounter = nil, nil
 	if sm, ok := instance.GetFeature(stats.ManagerType()).(stats.Manager); ok && sm != nil {
 		m.uplinkCounter = getOrRegisterCounter(sm, "outbound>>>proxy>>>traffic>>>uplink")
 		m.downlinkCounter = getOrRegisterCounter(sm, "outbound>>>proxy>>>traffic>>>downlink")
+		m.directUplinkCounter = getOrRegisterCounter(sm, "outbound>>>direct>>>traffic>>>uplink")
+		m.directDownlinkCounter = getOrRegisterCounter(sm, "outbound>>>direct>>>traffic>>>downlink")
 	}
 	return nil
 }
@@ -316,6 +324,7 @@ func (m *Manager) Stop() error {
 	m.sshBridge = nil
 	m.removeRoutes()
 	m.uplinkCounter, m.downlinkCounter = nil, nil
+	m.directUplinkCounter, m.directDownlinkCounter = nil, nil
 	m.status = Status{State: StateStopped}
 	return err
 }
@@ -341,11 +350,19 @@ func (m *Manager) Traffic() Traffic {
 
 	var t Traffic
 	if m.uplinkCounter != nil {
-		t.Uplink = m.uplinkCounter.Value()
+		t.Proxy.Uplink = m.uplinkCounter.Value()
 	}
 	if m.downlinkCounter != nil {
-		t.Downlink = m.downlinkCounter.Value()
+		t.Proxy.Downlink = m.downlinkCounter.Value()
 	}
+	if m.directUplinkCounter != nil {
+		t.Direct.Uplink = m.directUplinkCounter.Value()
+	}
+	if m.directDownlinkCounter != nil {
+		t.Direct.Downlink = m.directDownlinkCounter.Value()
+	}
+	t.Uplink = t.Proxy.Uplink + t.Direct.Uplink
+	t.Downlink = t.Proxy.Downlink + t.Direct.Downlink
 	return t
 }
 

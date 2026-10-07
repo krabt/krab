@@ -5,10 +5,23 @@
 // @ts-ignore: Unused imports
 import type { Events } from "@wailsio/runtime";
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import type * as system$0 from "../../../../krabt/krab/internal/system/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import type * as xray$0 from "../../../../krabt/krab/internal/xray/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import type * as profile$0 from "../../../../krabt/krab/pkg/profile/models.js";
+
 declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
+            "connection:changed": xray$0.Status;
             "profile:selected": string;
+            "profiles:changed": profile$0.Server[];
+            "system-proxy:changed": system$0.ProxyStatus;
             "update:progress": { [_ in string]?: number };
         }
     }

@@ -6,13 +6,30 @@
 // @ts-ignore: Unused imports
 import { Create as $Create } from "@wailsio/runtime";
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as system$0 from "../../../../krabt/krab/internal/system/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as xray$0 from "../../../../krabt/krab/internal/xray/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as profile$0 from "../../../../krabt/krab/pkg/profile/models.js";
+
 function configure() {
     Object.freeze(Object.assign($Create.Events, {
-        "update:progress": $$createType0,
+        "connection:changed": $$createType0,
+        "profiles:changed": $$createType2,
+        "system-proxy:changed": $$createType3,
+        "update:progress": $$createType4,
     }));
 }
 
 // Private type creation functions
-const $$createType0 = $Create.Map($Create.Any, $Create.Any);
+const $$createType0 = xray$0.Status.createFrom;
+const $$createType1 = profile$0.Server.createFrom;
+const $$createType2 = $Create.Array($$createType1);
+const $$createType3 = system$0.ProxyStatus.createFrom;
+const $$createType4 = $Create.Map($Create.Any, $Create.Any);
 
 configure();

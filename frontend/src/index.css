@@ -127,6 +127,15 @@ body {
   font-family: 'InterPanel', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 [data-theme='dark'] body {
   background: var(--bg);
 }
@@ -294,6 +303,10 @@ select {
 
 .connect-pane {
   background: var(--bg-panel);
+}
+
+.server-detail-pane > * {
+  flex-shrink: 0;
 }
 
 @media (max-width: 900px) {

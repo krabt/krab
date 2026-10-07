@@ -33,6 +33,20 @@ export class DailyTraffic {
              */
             this["downlink"] = 0;
         }
+        if (!("proxy" in $$source)) {
+            /**
+             * @member
+             * @type {TrafficTotals}
+             */
+            this["proxy"] = (new TrafficTotals());
+        }
+        if (!("direct" in $$source)) {
+            /**
+             * @member
+             * @type {TrafficTotals}
+             */
+            this["direct"] = (new TrafficTotals());
+        }
 
         Object.assign(this, $$source);
     }
@@ -43,7 +57,15 @@ export class DailyTraffic {
      * @returns {DailyTraffic}
      */
     static createFrom($$source = {}) {
+        const $$createField3_0 = $$createType0;
+        const $$createField4_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("proxy" in $$parsedSource) {
+            $$parsedSource["proxy"] = $$createField3_0($$parsedSource["proxy"]);
+        }
+        if ("direct" in $$parsedSource) {
+            $$parsedSource["direct"] = $$createField4_0($$parsedSource["direct"]);
+        }
         return new DailyTraffic(/** @type {Partial<DailyTraffic>} */($$parsedSource));
     }
 }
@@ -113,9 +135,9 @@ export class GeoSettings {
      * @returns {GeoSettings}
      */
     static createFrom($$source = {}) {
-        const $$createField4_0 = $$createType0;
-        const $$createField5_0 = $$createType1;
-        const $$createField6_0 = $$createType2;
+        const $$createField4_0 = $$createType1;
+        const $$createField5_0 = $$createType2;
+        const $$createField6_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("dnsHosts" in $$parsedSource) {
             $$parsedSource["dnsHosts"] = $$createField4_0($$parsedSource["dnsHosts"]);
@@ -224,12 +246,12 @@ export class OutboundRule {
      * @returns {OutboundRule}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType1;
-        const $$createField4_0 = $$createType1;
-        const $$createField5_0 = $$createType1;
-        const $$createField6_0 = $$createType1;
-        const $$createField7_0 = $$createType1;
-        const $$createField8_0 = $$createType1;
+        const $$createField3_0 = $$createType2;
+        const $$createField4_0 = $$createType2;
+        const $$createField5_0 = $$createType2;
+        const $$createField6_0 = $$createType2;
+        const $$createField7_0 = $$createType2;
+        const $$createField8_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("whitelistDomains" in $$parsedSource) {
             $$parsedSource["whitelistDomains"] = $$createField3_0($$parsedSource["whitelistDomains"]);
@@ -276,7 +298,7 @@ export class OutboundSettings {
      * @returns {OutboundSettings}
      */
     static createFrom($$source = {}) {
-        const $$createField0_0 = $$createType4;
+        const $$createField0_0 = $$createType5;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("rules" in $$parsedSource) {
             $$parsedSource["rules"] = $$createField0_0($$parsedSource["rules"]);
@@ -368,6 +390,13 @@ export class Status {
              * @member
              * @type {string | undefined}
              */
+            this["serverId"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
             this["server"] = undefined;
         }
         if (/** @type {any} */(false)) {
@@ -419,6 +448,20 @@ export class Traffic {
              */
             this["downlink"] = 0;
         }
+        if (!("proxy" in $$source)) {
+            /**
+             * @member
+             * @type {TrafficTotals}
+             */
+            this["proxy"] = (new TrafficTotals());
+        }
+        if (!("direct" in $$source)) {
+            /**
+             * @member
+             * @type {TrafficTotals}
+             */
+            this["direct"] = (new TrafficTotals());
+        }
         if (/** @type {any} */(false)) {
             /**
              * @member
@@ -436,10 +479,18 @@ export class Traffic {
      * @returns {Traffic}
      */
     static createFrom($$source = {}) {
-        const $$createField2_0 = $$createType6;
+        const $$createField2_0 = $$createType0;
+        const $$createField3_0 = $$createType0;
+        const $$createField4_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("proxy" in $$parsedSource) {
+            $$parsedSource["proxy"] = $$createField2_0($$parsedSource["proxy"]);
+        }
+        if ("direct" in $$parsedSource) {
+            $$parsedSource["direct"] = $$createField3_0($$parsedSource["direct"]);
+        }
         if ("history" in $$parsedSource) {
-            $$parsedSource["history"] = $$createField2_0($$parsedSource["history"]);
+            $$parsedSource["history"] = $$createField4_0($$parsedSource["history"]);
         }
         return new Traffic(/** @type {Partial<Traffic>} */($$parsedSource));
     }
@@ -457,6 +508,20 @@ export class TrafficHistory {
              * @type {TrafficTotals}
              */
             this["total"] = (new TrafficTotals());
+        }
+        if (!("proxy" in $$source)) {
+            /**
+             * @member
+             * @type {TrafficTotals}
+             */
+            this["proxy"] = (new TrafficTotals());
+        }
+        if (!("direct" in $$source)) {
+            /**
+             * @member
+             * @type {TrafficTotals}
+             */
+            this["direct"] = (new TrafficTotals());
         }
         if (!("daily" in $$source)) {
             /**
@@ -482,18 +547,26 @@ export class TrafficHistory {
      * @returns {TrafficHistory}
      */
     static createFrom($$source = {}) {
-        const $$createField0_0 = $$createType7;
-        const $$createField1_0 = $$createType9;
-        const $$createField2_0 = $$createType11;
+        const $$createField0_0 = $$createType0;
+        const $$createField1_0 = $$createType0;
+        const $$createField2_0 = $$createType0;
+        const $$createField3_0 = $$createType9;
+        const $$createField4_0 = $$createType11;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("total" in $$parsedSource) {
             $$parsedSource["total"] = $$createField0_0($$parsedSource["total"]);
         }
+        if ("proxy" in $$parsedSource) {
+            $$parsedSource["proxy"] = $$createField1_0($$parsedSource["proxy"]);
+        }
+        if ("direct" in $$parsedSource) {
+            $$parsedSource["direct"] = $$createField2_0($$parsedSource["direct"]);
+        }
         if ("daily" in $$parsedSource) {
-            $$parsedSource["daily"] = $$createField1_0($$parsedSource["daily"]);
+            $$parsedSource["daily"] = $$createField3_0($$parsedSource["daily"]);
         }
         if ("servers" in $$parsedSource) {
-            $$parsedSource["servers"] = $$createField2_0($$parsedSource["servers"]);
+            $$parsedSource["servers"] = $$createField4_0($$parsedSource["servers"]);
         }
         return new TrafficHistory(/** @type {Partial<TrafficHistory>} */($$parsedSource));
     }
@@ -535,14 +608,14 @@ export class TrafficTotals {
 }
 
 // Private type creation functions
-const $$createType0 = $Create.Map($Create.Any, $Create.Any);
-const $$createType1 = $Create.Array($Create.Any);
-const $$createType2 = $Create.Map($Create.Any, $Create.Any);
-const $$createType3 = OutboundRule.createFrom;
-const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = TrafficHistory.createFrom;
-const $$createType6 = $Create.Nullable($$createType5);
-const $$createType7 = TrafficTotals.createFrom;
+const $$createType0 = TrafficTotals.createFrom;
+const $$createType1 = $Create.Map($Create.Any, $Create.Any);
+const $$createType2 = $Create.Array($Create.Any);
+const $$createType3 = $Create.Map($Create.Any, $Create.Any);
+const $$createType4 = OutboundRule.createFrom;
+const $$createType5 = $Create.Array($$createType4);
+const $$createType6 = TrafficHistory.createFrom;
+const $$createType7 = $Create.Nullable($$createType6);
 const $$createType8 = DailyTraffic.createFrom;
 const $$createType9 = $Create.Array($$createType8);
 const $$createType10 = ServerTraffic.createFrom;

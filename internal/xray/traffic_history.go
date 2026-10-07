@@ -19,6 +19,8 @@ type TrafficTotals struct {
 type DailyTraffic struct {
 	Date string `json:"date"`
 	TrafficTotals
+	Proxy  TrafficTotals `json:"proxy"`
+	Direct TrafficTotals `json:"direct"`
 }
 
 type ServerTraffic struct {
@@ -29,13 +31,19 @@ type ServerTraffic struct {
 
 type TrafficHistory struct {
 	Total   TrafficTotals   `json:"total"`
+	Proxy   TrafficTotals   `json:"proxy"`
+	Direct  TrafficTotals   `json:"direct"`
 	Daily   []DailyTraffic  `json:"daily"`
 	Servers []ServerTraffic `json:"servers"`
 }
 
 type trafficHistoryFile struct {
-	Daily   map[string]TrafficTotals `json:"daily"`
-	Servers map[string]ServerTraffic `json:"servers"`
+	Daily       map[string]TrafficTotals `json:"daily"`
+	DailyProxy  map[string]TrafficTotals `json:"dailyProxy,omitempty"`
+	DailyDirect map[string]TrafficTotals `json:"dailyDirect,omitempty"`
+	Servers     map[string]ServerTraffic `json:"servers"`
+	Proxy       TrafficTotals            `json:"proxy"`
+	Direct      TrafficTotals            `json:"direct"`
 }
 
 type TrafficHistoryStore struct {
@@ -51,6 +59,8 @@ func NewTrafficHistoryStore() *TrafficHistoryStore {
 	}
 	store := &TrafficHistoryStore{path: filepath.Join(dir, "krab", "traffic-history.json")}
 	store.data.Daily = map[string]TrafficTotals{}
+	store.data.DailyProxy = map[string]TrafficTotals{}
+	store.data.DailyDirect = map[string]TrafficTotals{}
 	store.data.Servers = map[string]ServerTraffic{}
 	if data, found, err := database.Get("traffic_history"); err == nil && found {
 		_ = json.Unmarshal(data, &store.data)
@@ -64,25 +74,67 @@ func NewTrafficHistoryStore() *TrafficHistoryStore {
 	if store.data.Servers == nil {
 		store.data.Servers = map[string]ServerTraffic{}
 	}
+	if store.data.DailyProxy == nil {
+		store.data.DailyProxy = map[string]TrafficTotals{}
+	}
+	if store.data.DailyDirect == nil {
+		store.data.DailyDirect = map[string]TrafficTotals{}
+	}
+	if len(store.data.DailyProxy) == 0 && len(store.data.DailyDirect) == 0 {
+		for date, totals := range store.data.Daily {
+			store.data.DailyProxy[date] = totals
+		}
+	}
+	// Traffic recorded before outbound categories were introduced only
+	// contained the proxy outbound counters. Preserve it as proxy traffic.
+	if store.data.Proxy == (TrafficTotals{}) && store.data.Direct == (TrafficTotals{}) {
+		for _, totals := range store.data.Daily {
+			store.data.Proxy.Uplink += totals.Uplink
+			store.data.Proxy.Downlink += totals.Downlink
+		}
+	}
 	return store
 }
 
 func (s *TrafficHistoryStore) Record(serverID, serverName string, uplink, downlink int64, now time.Time) {
+	s.RecordOutbound(serverID, serverName, TrafficTotals{Uplink: uplink, Downlink: downlink}, TrafficTotals{}, now)
+}
+
+func (s *TrafficHistoryStore) RecordOutbound(serverID, serverName string, proxy, direct TrafficTotals, now time.Time) {
+	uplink, downlink := proxy.Uplink+direct.Uplink, proxy.Downlink+direct.Downlink
 	if uplink <= 0 && downlink <= 0 {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.data.DailyProxy == nil {
+		s.data.DailyProxy = map[string]TrafficTotals{}
+	}
+	if s.data.DailyDirect == nil {
+		s.data.DailyDirect = map[string]TrafficTotals{}
+	}
 	date := now.Format("2006-01-02")
 	daily := s.data.Daily[date]
 	daily.Uplink += uplink
 	daily.Downlink += downlink
 	s.data.Daily[date] = daily
+	dailyProxy := s.data.DailyProxy[date]
+	dailyProxy.Uplink += proxy.Uplink
+	dailyProxy.Downlink += proxy.Downlink
+	s.data.DailyProxy[date] = dailyProxy
+	dailyDirect := s.data.DailyDirect[date]
+	dailyDirect.Uplink += direct.Uplink
+	dailyDirect.Downlink += direct.Downlink
+	s.data.DailyDirect[date] = dailyDirect
 	server := s.data.Servers[serverID]
 	server.ID, server.Name = serverID, serverName
 	server.Uplink += uplink
 	server.Downlink += downlink
 	s.data.Servers[serverID] = server
+	s.data.Proxy.Uplink += proxy.Uplink
+	s.data.Proxy.Downlink += proxy.Downlink
+	s.data.Direct.Uplink += direct.Uplink
+	s.data.Direct.Downlink += direct.Downlink
 }
 
 func (s *TrafficHistoryStore) Save() error {
@@ -98,9 +150,9 @@ func (s *TrafficHistoryStore) Save() error {
 func (s *TrafficHistoryStore) Snapshot() TrafficHistory {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	result := TrafficHistory{Daily: make([]DailyTraffic, 0, len(s.data.Daily)), Servers: make([]ServerTraffic, 0, len(s.data.Servers))}
+	result := TrafficHistory{Proxy: s.data.Proxy, Direct: s.data.Direct, Daily: make([]DailyTraffic, 0, len(s.data.Daily)), Servers: make([]ServerTraffic, 0, len(s.data.Servers))}
 	for date, totals := range s.data.Daily {
-		result.Daily = append(result.Daily, DailyTraffic{Date: date, TrafficTotals: totals})
+		result.Daily = append(result.Daily, DailyTraffic{Date: date, TrafficTotals: totals, Proxy: s.data.DailyProxy[date], Direct: s.data.DailyDirect[date]})
 		result.Total.Uplink += totals.Uplink
 		result.Total.Downlink += totals.Downlink
 	}

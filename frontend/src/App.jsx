@@ -59,6 +59,12 @@ function errorText(err) {
   return String(err)
 }
 
+function mergeServersById(current, incoming) {
+  const merged = new Map(current.map((server) => [server.id, server]))
+  for (const server of incoming) merged.set(server.id, server)
+  return [...merged.values()]
+}
+
 async function copyText(text) {
   try {
     await Clipboard.SetText(text)
@@ -140,12 +146,6 @@ function proxyEndpointSummary(config) {
     : `HTTP ${http} · HTTPS ${https} · SOCKS5 ${socks}`
 }
 
-function StatusDot({ state }) {
-  const color =
-    state === 'running' ? 'bg-emerald-400' : state === 'starting' ? 'bg-amber-400' : state === 'error' ? 'bg-red-400' : 'bg-neutral-600'
-  return <span className={`inline-block w-2 h-2 rounded-full ${color}`} />
-}
-
 function IconButton({ onClick, title, active, label, children }) {
   return (
     <button
@@ -162,8 +162,7 @@ function IconButton({ onClick, title, active, label, children }) {
   )
 }
 
-function ServerRow({ s, isSelected, isRunning, editingId, editingName, setEditingName, onSelect, onStartEdit, onCommitEdit, onCancelEdit, onDelete, onDuplicate, onShare, ping, t }) {
-  const isActive = isSelected && isRunning
+function ServerRow({ s, isSelected, isConnected, editingId, editingName, setEditingName, onSelect, onStartEdit, onCommitEdit, onCancelEdit, onDelete, onDuplicate, onShare, ping, t }) {
   return (
     <div
       onClick={onSelect}
@@ -172,8 +171,8 @@ function ServerRow({ s, isSelected, isRunning, editingId, editingName, setEditin
         : 'bg-[var(--bg-panel)] border-transparent hover:bg-[var(--bg-hover)] hover:border-[var(--border)]'
         }`}
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0 flex-1">
+      <div className="relative flex min-h-10 items-center">
+        <div className={`min-w-0 flex-1 transition-[padding] group-hover:pr-16 ${ping !== undefined ? 'pr-14' : 'pr-0'}`}>
           {editingId === s.id ? (
             <input
               {...noTextAssist}
@@ -189,9 +188,9 @@ function ServerRow({ s, isSelected, isRunning, editingId, editingName, setEditin
               }}
             />
           ) : (
-            <div className="flex items-center gap-1.5">
-              {isActive && <StatusDot state="running" />}
-              <div className="text-sm font-medium truncate">{s.name}</div>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <div className="min-w-0 flex-1 truncate text-sm font-medium">{s.name}</div>
+              {isConnected && <Icon path={icons.globe} className="h-3.5 w-3.5 shrink-0 text-emerald-400" />}
             </div>
           )}
           <div className="text-[11px] text-[var(--text-faint)] truncate mt-0.5">
@@ -200,13 +199,13 @@ function ServerRow({ s, isSelected, isRunning, editingId, editingName, setEditin
         </div>
         {ping !== undefined && (
           <span
-            className={`shrink-0 text-[11px] font-medium tabular-nums group-hover:hidden ${ping === null ? 'text-[var(--text-faint)]' : ping < 0 ? 'text-[var(--danger)]' : ping < 300 ? 'text-[var(--success)]' : 'text-amber-500'
+            className={`absolute right-0 top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] font-medium tabular-nums transition-opacity group-hover:opacity-0 ${ping === null ? 'text-[var(--text-faint)]' : ping < 0 ? 'text-[var(--danger)]' : ping < 300 ? 'text-[var(--success)]' : 'text-amber-500'
               }`}
           >
             {ping === null ? '…' : ping < 0 ? t('timeout') : `${ping} ms`}
           </span>
         )}
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+        <div className="pointer-events-none absolute right-0 top-1/2 grid -translate-y-1/2 grid-cols-2 gap-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
           <button
             className="server-action w-6 h-6 rounded text-[var(--text-faint)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] flex items-center justify-center"
             onClick={onDuplicate}
@@ -493,7 +492,8 @@ export default function App() {
   const [logLoading, setLogLoading] = useState(false)
   const [logLive, setLogLive] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
-  const [page, setPage] = useState('servers')
+  const [switchTarget, setSwitchTarget] = useState(null)
+  const [page, setPage] = useState('stats')
   const persistedSettings = useRef(null)
   const [theme, setTheme] = useState('dark')
   const [updateInfo, setUpdateInfo] = useState(null)
@@ -504,6 +504,7 @@ export default function App() {
   const [updateProgress, setUpdateProgress] = useState(null)
   const [mode, setMode] = useState('proxy')
   const [proxyConfig, setProxyConfig] = useState(defaultProxyConfig)
+  const [autoSetProxyOnConnect, setAutoSetProxyOnConnect] = useState(false)
   const [proxyAction, setProxyAction] = useState({ busy: false, message: '' })
   const [proxyStatus, setProxyStatus] = useState({ known: false, enabled: false, config: {} })
   const [outboundRules, setOutboundRules] = useState([])
@@ -589,9 +590,29 @@ export default function App() {
       setSelectedId(event.data)
       setPage('servers')
     })
+    const offProfilesChanged = Events.On('profiles:changed', (event) => {
+      const list = event.data || []
+      setServers(list)
+      setSelectedId((current) => current && list.some((server) => server.id === current)
+        ? current
+        : (list[0]?.id || null))
+    })
+    const offConnectionChanged = Events.On('connection:changed', (event) => {
+      setStatus(event.data)
+      if (event.data?.state === 'running' && event.data?.serverId) {
+        persistUISettings({ lastConnectedServerId: event.data.serverId, selectedServerId: event.data.serverId })
+      }
+    })
+    const offSystemProxyChanged = Events.On('system-proxy:changed', (event) => {
+      const value = event.data || {}
+      setProxyStatus({ known: true, enabled: Boolean(value.enabled), config: value.config || {} })
+    })
     return () => {
       offProgress()
       offProfileSelected()
+      offProfilesChanged()
+      offConnectionChanged()
+      offSystemProxyChanged()
     }
   }, [])
 
@@ -619,15 +640,18 @@ export default function App() {
       if (ui.lang === 'zh' || ui.lang === 'en') setLang(ui.lang)
       if (typeof ui.killSwitch === 'boolean') setKillSwitch(ui.killSwitch)
       if (ui.proxyConfig) setProxyConfig((current) => ({ ...current, ...ui.proxyConfig }))
+      if (typeof ui.autoSetProxyOnConnect === 'boolean') setAutoSetProxyOnConnect(ui.autoSetProxyOnConnect)
       if (ui.pings) setPings(ui.pings)
       if (typeof ui.sortByDelay === 'boolean') setSortByDelay(ui.sortByDelay)
       if (ui.pingMode) setPingMode(ui.pingMode)
-      if (ui.selectedServerId) setSelectedId(ui.selectedServerId)
+      if (ui.lastConnectedServerId || ui.selectedServerId) setSelectedId(ui.lastConnectedServerId || ui.selectedServerId)
       const hydrated = {
         theme: ui.theme || theme, lang: ui.lang || lang,
         killSwitch: ui.killSwitch ?? killSwitch, proxyConfig: ui.proxyConfig || proxyConfig,
+        autoSetProxyOnConnect: ui.autoSetProxyOnConnect ?? false,
         pings: ui.pings || pings, sortByDelay: ui.sortByDelay ?? sortByDelay,
-        pingMode: ui.pingMode || pingMode, selectedServerId: ui.selectedServerId || selectedId,
+        pingMode: ui.pingMode || pingMode, selectedServerId: ui.lastConnectedServerId || ui.selectedServerId || selectedId,
+        lastConnectedServerId: ui.lastConnectedServerId || '',
       }
       persistedSettings.current = { ...settings, ui: hydrated }
       SaveGeoSettings(persistedSettings.current).catch(() => { })
@@ -898,6 +922,8 @@ export default function App() {
 
   const selected = servers.find((s) => s.id === selectedId) || null
   const isRunning = status.state === 'running'
+  const connectedServerId = isRunning ? status.serverId : null
+  const isSelectedConnected = Boolean(selected && connectedServerId === selected.id)
   const isBusy = pending || status.state === 'starting'
   const needsElevation = (mode === 'tun' || killSwitch) && !elevated
 
@@ -914,6 +940,9 @@ export default function App() {
   const [trafficOpen, setTrafficOpen] = useState(false)
   const [traffic, setTraffic] = useState({ uplink: 0, downlink: 0 })
   const [speed, setSpeed] = useState({ up: 0, down: 0 })
+  const [speedSamples, setSpeedSamples] = useState([])
+  const [speedDuration, setSpeedDuration] = useState(60)
+  const [speedSeries, setSpeedSeries] = useState(['up', 'down'])
   const lastTraffic = useRef(null)
 
   useEffect(() => {
@@ -921,20 +950,30 @@ export default function App() {
       lastTraffic.current = null
       setTraffic({ uplink: 0, downlink: 0 })
       setSpeed({ up: 0, down: 0 })
-      return
+      const appendIdleSample = () => setSpeedSamples((current) => [...current.slice(-1799), { up: 0, down: 0, proxyUp: 0, proxyDown: 0, directUp: 0, directDown: 0 }])
+      appendIdleSample()
+      const id = setInterval(appendIdleSample, 1000)
+      return () => clearInterval(id)
     }
     const poll = () => {
       Traffic()
         .then((t) => {
           const prev = lastTraffic.current
+          let nextSpeed = { up: 0, down: 0, proxyUp: 0, proxyDown: 0, directUp: 0, directDown: 0 }
           if (prev) {
             const elapsed = (Date.now() - prev.at) / 1000
-            setSpeed({
+            nextSpeed = {
               up: elapsed > 0 ? Math.max(0, (t.uplink - prev.uplink) / elapsed) : 0,
               down: elapsed > 0 ? Math.max(0, (t.downlink - prev.downlink) / elapsed) : 0,
-            })
+              proxyUp: elapsed > 0 ? Math.max(0, ((t.proxy?.uplink || 0) - (prev.proxy?.uplink || 0)) / elapsed) : 0,
+              proxyDown: elapsed > 0 ? Math.max(0, ((t.proxy?.downlink || 0) - (prev.proxy?.downlink || 0)) / elapsed) : 0,
+              directUp: elapsed > 0 ? Math.max(0, ((t.direct?.uplink || 0) - (prev.direct?.uplink || 0)) / elapsed) : 0,
+              directDown: elapsed > 0 ? Math.max(0, ((t.direct?.downlink || 0) - (prev.direct?.downlink || 0)) / elapsed) : 0,
+            }
           }
-          lastTraffic.current = { uplink: t.uplink, downlink: t.downlink, at: Date.now() }
+          setSpeed(nextSpeed)
+          setSpeedSamples((current) => [...current.slice(-1799), nextSpeed])
+          lastTraffic.current = { uplink: t.uplink, downlink: t.downlink, proxy: t.proxy, direct: t.direct, at: Date.now() }
           setTraffic(t)
         })
         .catch(() => { })
@@ -965,11 +1004,11 @@ export default function App() {
     try {
       if (/^https?:\/\//i.test(value)) {
         const added = await AddSubscription(value)
-        setServers((prev) => [...prev, ...added])
+        setServers((prev) => mergeServersById(prev, added))
         if (added.length > 0) setSelectedId(added[added.length - 1].id)
       } else {
         const server = await AddProfileFromLink(value)
-        setServers((prev) => [...prev, server])
+        setServers((prev) => mergeServersById(prev, [server]))
         setSelectedId(server.id)
       }
       setLink('')
@@ -982,16 +1021,8 @@ export default function App() {
   async function handleToggle() {
     setError('')
     setTestResult(null)
-    if (isRunning) {
-      setPending(true)
-      try {
-        await Disconnect()
-        setStatus(await Status())
-      } catch (err) {
-        setError(errorText(err))
-      } finally {
-        setPending(false)
-      }
+    if (isSelectedConnected) {
+      await disconnectService()
       return
     }
 
@@ -999,10 +1030,42 @@ export default function App() {
       setError(t('addServerFirst'))
       return
     }
+    if (isRunning) {
+      setSwitchTarget({ id: selected.id, name: selected.name })
+      return
+    }
+    await connectServer(selected)
+  }
+
+  async function disconnectService() {
     setPending(true)
     try {
-      await Connect(selected.id, mode, killSwitch)
+      await Disconnect()
       setStatus(await Status())
+    } catch (err) {
+      setError(errorText(err))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  async function handleDashboardConnectionToggle() {
+    if (isRunning) {
+      setError('')
+      setTestResult(null)
+      await disconnectService()
+      return
+    }
+    await handleToggle()
+  }
+
+  async function connectServer(server) {
+    setPending(true)
+    try {
+      await Connect(server.id, mode, killSwitch)
+      setStatus(await Status())
+      persistUISettings({ lastConnectedServerId: server.id, selectedServerId: server.id })
+      await applyProxyAfterConnect()
       handleTest()
     } catch (err) {
       setError(errorText(err))
@@ -1010,6 +1073,51 @@ export default function App() {
     } finally {
       setPending(false)
     }
+  }
+
+  async function confirmSwitchConnection() {
+    const target = switchTarget
+    if (!target) return
+    setSwitchTarget(null)
+    setError('')
+    setTestResult(null)
+    setPending(true)
+    try {
+      await Disconnect()
+      setStatus(await Status())
+      await Connect(target.id, mode, killSwitch)
+      setStatus(await Status())
+      persistUISettings({ lastConnectedServerId: target.id, selectedServerId: target.id })
+      await applyProxyAfterConnect()
+      handleTest()
+    } catch (err) {
+      setError(errorText(err))
+      setStatus(await Status().catch(() => ({ state: 'stopped' })))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  async function applyProxyAfterConnect() {
+    if (!autoSetProxyOnConnect) return
+    const current = await SystemProxyStatus().catch(() => null)
+    if (!current || current.enabled) return
+    try {
+      const normalizedConfig = normalizeProxyPorts(proxyConfig, t('invalidProxyPort'))
+      if (normalizedConfig.socksPort === normalizedConfig.httpPort || normalizedConfig.socksPort === normalizedConfig.httpsPort) {
+        throw new Error(t('proxyPortConflict'))
+      }
+      await SetSystemProxy(normalizedConfig)
+      const updated = await SystemProxyStatus().catch(() => ({ enabled: true, config: normalizedConfig }))
+      setProxyStatus({ known: true, enabled: Boolean(updated?.enabled), config: updated?.config || normalizedConfig })
+    } catch (err) {
+      setProxyAction({ busy: false, message: errorText(err) })
+    }
+  }
+
+  function handleAutoSetProxyOnConnectChange(enabled) {
+    setAutoSetProxyOnConnect(enabled)
+    persistUISettings({ autoSetProxyOnConnect: enabled })
   }
 
   async function handleRestartElevated() {
@@ -1046,7 +1154,7 @@ export default function App() {
         extra,
         outboundRuleIds: [...(server.outboundRuleIds || [])],
       })
-      setServers((prev) => [...prev, duplicate])
+      setServers((prev) => mergeServersById(prev, [duplicate]))
       setSelectedId(duplicate.id)
     } catch (err) {
       setError(errorText(err))
@@ -1163,6 +1271,14 @@ export default function App() {
     }
   }
 
+  function handleToggleProxy() {
+    if (proxyStatus.known && proxyStatus.enabled) {
+      handleClearProxy()
+    } else {
+      handleApplyProxy()
+    }
+  }
+
   async function handleCopyTerminalProxy() {
     const http = `http://${proxyConfig.httpHost}:${proxyConfig.httpPort}`
     const https = `http://${proxyConfig.httpsHost}:${proxyConfig.httpsPort}`
@@ -1254,6 +1370,9 @@ export default function App() {
         {/* Icon rail */}
         <aside className="app-sidebar w-[168px] flex flex-col py-6 px-2 gap-1 bg-[var(--bg-panel)] border-r border-[var(--border)] shrink-0 transition-[width]">
           <div className="brand-area flex items-center gap-3 px-2 mb-7"><img src={logo} alt="Krab" className="brand-logo w-10 h-10 min-w-10 shrink-0 aspect-square rounded-full object-cover ring-1 ring-white/15 shadow-[0_4px_18px_rgba(0,0,0,.3)]" /><div className="brand-copy"><b className="block text-sm tracking-[.22em]">KRAB</b><small className="block text-[8px] tracking-[.16em] text-[var(--text-faint)] mt-1">XRAY PANEL</small></div></div>
+          <IconButton active={page === 'stats'} label={t('stats')} title={t('stats')} onClick={() => setPage('stats')}>
+            <Icon path={icons.chart} className="w-5 h-5" />
+          </IconButton>
           <IconButton active={page === 'servers'} label={t('servers')} title={t('servers')} onClick={() => setPage('servers')}>
             <Icon path={icons.globe} className="w-5 h-5" />
           </IconButton>
@@ -1262,9 +1381,6 @@ export default function App() {
           </IconButton>
           <IconButton active={page === 'logs'} label={lang === 'zh' ? '日志' : 'Logs'} title={lang === 'zh' ? '日志' : 'Logs'} onClick={handleShowLog}>
             <Icon path={icons.terminal} className="w-5 h-5" />
-          </IconButton>
-          <IconButton active={page === 'stats'} label={t('stats')} title={t('stats')} onClick={() => setPage('stats')}>
-            <Icon path={icons.chart} className="w-5 h-5" />
           </IconButton>
           <div className="relative w-full">
             <IconButton label={t('language')} title={t('language')} onClick={() => setLangOpen((v) => !v)}>
@@ -1317,11 +1433,11 @@ export default function App() {
         {page === 'logs' ? (
           <LogsView lang={lang} log={log} loading={logLoading} live={logLive} onRefresh={handleShowLog} onToggleLive={() => setLogLive((value) => !value)} />
         ) : page === 'stats' ? (
-          <StatsView t={t} loadTraffic={Traffic} />
+          <StatsView t={t} loadTraffic={Traffic} speedSamples={speedSamples} speedDuration={speedDuration} onSpeedDurationChange={setSpeedDuration} speedSeries={speedSeries} onSpeedSeriesChange={setSpeedSeries} connected={isRunning} canConnect={Boolean(selected)} connectionBusy={isBusy} proxyEnabled={proxyStatus.known && proxyStatus.enabled} proxyBusy={proxyAction.busy} onToggleConnection={handleDashboardConnectionToggle} onToggleProxy={handleToggleProxy} />
         ) : page === 'outbound' ? (
           <OutboundSettingsView lang={lang} t={t} loadSettings={OutboundSettings} saveRule={handleSaveOutboundRule} deleteRule={handleDeleteOutboundRule} />
         ) : page === 'proxy-settings' ? (
-          <ProxySettingsView lang={lang} t={t} version={version} onOpenAbout={() => setAboutOpen(true)} config={proxyConfig} onConfigChange={setProxyConfig} saveProxyConfig={handleSaveProxyConfig} loadGeoSettings={GeoSettings} saveGeoSettings={SaveGeoSettings} updateGeoData={UpdateGeoData} loadAutoStart={AutoStartEnabled} setAutoStart={SetAutoStart} />
+          <ProxySettingsView lang={lang} t={t} version={version} onOpenAbout={() => setAboutOpen(true)} config={proxyConfig} onConfigChange={setProxyConfig} saveProxyConfig={handleSaveProxyConfig} autoSetProxyOnConnect={autoSetProxyOnConnect} onAutoSetProxyOnConnectChange={handleAutoSetProxyOnConnectChange} loadGeoSettings={GeoSettings} saveGeoSettings={SaveGeoSettings} updateGeoData={UpdateGeoData} loadAutoStart={AutoStartEnabled} setAutoStart={SetAutoStart} />
         ) : <>
           {/* Server list */}
           <section className="server-pane w-[300px] border-r border-[var(--border)] flex flex-col shrink-0">
@@ -1433,14 +1549,23 @@ export default function App() {
                   <input
                     {...noTextAssist}
                     autoFocus
-                    className="flex-1 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border)] px-3 py-2 text-xs placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--accent)]"
+                    className="min-w-0 flex-1 overflow-x-auto overscroll-x-contain whitespace-nowrap rounded-lg bg-[var(--bg-elevated)] border border-[var(--border)] px-3 py-2 text-xs placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--accent)]"
+                    style={{ touchAction: 'pan-x', overscrollBehavior: 'contain' }}
                     placeholder={t('addLinkPlaceholder')}
                     value={link}
                     onChange={(e) => setLink(e.target.value)}
+                    onWheelCapture={(e) => {
+                      const input = e.currentTarget
+                      const delta = e.deltaX || (e.shiftKey ? e.deltaY : 0)
+                      if (!delta) return
+                      e.preventDefault()
+                      e.stopPropagation()
+                      input.scrollLeft += delta
+                    }}
                     onKeyDown={(e) => e.key === 'Enter' && handleAddLink()}
                   />
                   <button
-                    className="rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--accent-text)] px-3 text-xs font-medium transition-colors"
+                    className="shrink-0 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--accent-text)] px-3 text-xs font-medium transition-colors"
                     onClick={handleAddLink}
                   >
                     {t('add')}
@@ -1474,7 +1599,7 @@ export default function App() {
                   key={s.id}
                   s={s}
                   isSelected={s.id === selectedId}
-                  isRunning={isRunning}
+                  isConnected={s.id === connectedServerId}
                   editingId={editingId}
                   editingName={editingName}
                   setEditingName={setEditingName}
@@ -1612,7 +1737,7 @@ export default function App() {
                             key={s.id}
                             s={s}
                             isSelected={s.id === selectedId}
-                            isRunning={isRunning}
+                            isConnected={s.id === connectedServerId}
                             editingId={editingId}
                             editingName={editingName}
                             setEditingName={setEditingName}
@@ -1639,14 +1764,11 @@ export default function App() {
           </section>
 
           {/* Connect panel */}
-          <main className="connect-pane flex-1 flex flex-col items-center justify-center gap-6 px-8 pb-8 pt-28 relative overflow-y-auto">
+          <main className="server-detail-pane connect-pane relative min-h-0 flex-1 overflow-y-auto px-8 pb-8 pt-28 flex flex-col items-center justify-start gap-6">
             <div className="absolute top-8 left-1/2 z-10 flex max-w-full -translate-x-1/2 flex-col items-center gap-3">
               <div className="flex w-max max-w-full items-center gap-1 rounded-xl border border-[var(--border)] bg-[var(--bg-panel)] px-4 py-1 shadow-sm">
-                <button disabled={proxyAction.busy} onClick={handleApplyProxy} className={`min-h-8 whitespace-nowrap rounded-lg border px-2 py-1.5 text-[10px] font-medium disabled:opacity-50 ${proxyStatus.known && proxyStatus.enabled ? 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-text)] hover:bg-[var(--accent-hover)]' : 'border-[var(--border)] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]'}`}>
-                  {lang === 'zh' ? '设置代理' : 'Apply proxy'}
-                </button>
-                <button disabled={proxyAction.busy} onClick={handleClearProxy} className="min-h-8 whitespace-nowrap rounded-lg border border-[var(--border)] px-2 py-1.5 text-[10px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] disabled:opacity-50">
-                  {lang === 'zh' ? '取消代理' : 'Clear proxy'}
+                <button disabled={proxyAction.busy} onClick={handleToggleProxy} className={`min-h-8 whitespace-nowrap rounded-lg border px-2 py-1.5 text-[10px] font-medium disabled:opacity-50 ${proxyStatus.known && proxyStatus.enabled ? 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-text)] hover:bg-[var(--accent-hover)]' : 'border-[var(--border)] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]'}`}>
+                  {proxyStatus.known && proxyStatus.enabled ? t('clearProxy') : t('applyProxy')}
                 </button>
                 <button onClick={handleCopyTerminalProxy} className="flex min-h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-[var(--border)] px-2 py-1.5 text-[10px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]">
                   <Icon path={icons.copy} className="h-3.5 w-3.5 shrink-0" />
@@ -1748,7 +1870,7 @@ export default function App() {
             <button
               onClick={handleToggle}
               disabled={isBusy || (!isRunning && !selected) || (needsElevation && !isRunning)}
-              className={`relative w-40 h-40 rounded-full flex items-center justify-center transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed ${isRunning
+              className={`relative w-40 h-40 rounded-full flex items-center justify-center transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed ${isSelectedConnected
                 ? 'bg-[var(--accent)] shadow-[0_0_60px_-10px_rgba(99,102,241,0.7)]'
                 : 'bg-[var(--bg-panel)] border border-[var(--border-strong)] hover:border-[var(--text-faint)]'
                 }`}
@@ -1756,22 +1878,22 @@ export default function App() {
               {isBusy ? (
                 <div className="w-8 h-8 border-2 border-[var(--text-faint)] border-t-transparent rounded-full animate-spin" />
               ) : (
-                <Icon path={icons.power} className={`w-12 h-12 ${isRunning ? 'text-[var(--accent-text)]' : 'text-[var(--text-faint)]'}`} />
+                <Icon path={icons.power} className={`w-12 h-12 ${isSelectedConnected ? 'text-[var(--accent-text)]' : 'text-[var(--text-faint)]'}`} />
               )}
             </button>
 
             <div className="text-center">
               <div className="text-sm font-medium">
-                {isBusy ? (isRunning ? t('disconnecting') : t('connecting')) : isRunning ? t('connected') : t('disconnected')}
+                {isBusy ? (isSelectedConnected ? t('disconnecting') : t('connecting')) : isSelectedConnected ? t('connected') : t('disconnected')}
               </div>
-              {isRunning && (
+              {isSelectedConnected && (
                 <div className="text-xs text-[var(--text-faint)] mt-1">
                   {status.mode === 'tun' ? t('tunAdapterAllTraffic') : proxyEndpointSummary(persistedSettings.current?.ui?.proxyConfig)}
                 </div>
               )}
             </div>
 
-            {isRunning && (
+            {isSelectedConnected && (
               <button
                 onClick={handleTest}
                 disabled={testing}
@@ -1788,7 +1910,7 @@ export default function App() {
                   {error}
                 </div>
               )}
-              {testResult && testResult.ok && (
+              {isSelectedConnected && testResult && testResult.ok && (
                 <div className="rounded-lg border border-[var(--success-border)] bg-[var(--success-bg)] px-3 py-2 text-xs text-[var(--success)] flex items-center justify-center gap-2">
                   {testResult.country && (
                     <img
@@ -1804,14 +1926,14 @@ export default function App() {
                   <span>{testResult.delayMs}ms</span>
                 </div>
               )}
-              {testResult && !testResult.ok && (
+              {isSelectedConnected && testResult && !testResult.ok && (
                 <div className="rounded-lg border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2 text-xs text-[var(--danger)] break-words">
                   ✗ {testResult.text}
                 </div>
               )}
             </div>
 
-            {isRunning && (
+            {isSelectedConnected && (
               <div className="w-full max-w-sm rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] overflow-hidden">
                 <button
                   onClick={() => setTrafficOpen((v) => !v)}
@@ -1865,6 +1987,34 @@ export default function App() {
 
       {editServer && (
         <ServerEditor initial={editServer} t={t} onCancel={() => setEditServer(null)} onSave={handleSaveServer} />
+      )}
+
+      {switchTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setSwitchTarget(null)}>
+          <div
+            className="w-full max-w-sm rounded-xl border border-[var(--border)] bg-[var(--bg-panel)] p-5 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="text-sm font-semibold">{t('switchConnectionTitle')}</h2>
+            <p className="mt-2 text-xs leading-5 text-[var(--text-dim)]">
+              {t('switchConnectionMessage', status.server || t('connected'), switchTarget.name)}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                className="rounded-md px-3 py-1.5 text-xs hover:bg-[var(--bg-hover)]"
+                onClick={() => setSwitchTarget(null)}
+              >
+                {t('cancel')}
+              </button>
+              <button
+                className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs text-[var(--accent-text)] hover:bg-[var(--accent-hover)]"
+                onClick={confirmSwitchConnection}
+              >
+                {t('continueConnection')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {editGroup && (

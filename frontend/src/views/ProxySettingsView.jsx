@@ -9,7 +9,7 @@ const parseHosts = (value) => Object.fromEntries(value.split('\n').map((line) =>
   return separator < 0 ? ['', ''] : [line.slice(0, separator).trim(), line.slice(separator + 1).trim()]
 }).filter(([host, target]) => host && target))
 
-export default function ProxySettingsView({ lang, t, version, onOpenAbout, config, onConfigChange, saveProxyConfig, loadGeoSettings, saveGeoSettings, updateGeoData, loadAutoStart, setAutoStart }) {
+export default function ProxySettingsView({ lang, t, version, onOpenAbout, config, onConfigChange, saveProxyConfig, autoSetProxyOnConnect, onAutoSetProxyOnConnectChange, loadGeoSettings, saveGeoSettings, updateGeoData, loadAutoStart, setAutoStart }) {
   const zh = lang === 'zh'
   const [busy, setBusy] = useState('')
   const [message, setMessage] = useState('')
@@ -115,6 +115,10 @@ export default function ProxySettingsView({ lang, t, version, onOpenAbout, confi
 
       <section className="mt-10">
         <div className="mb-3"><h2 className="text-[11px] font-semibold">{zh ? '系统代理' : 'System proxy'}</h2><p className="text-[9px] text-[var(--text-faint)] mt-1">{zh ? '分别配置 HTTP、HTTPS 与 SOCKS5，点击设置后才会写入系统。' : 'Configure HTTP, HTTPS and SOCKS5 independently; changes apply only on request.'}</p></div>
+        <div className="proxy-settings-card mb-4 flex items-center justify-between gap-4 rounded-xl border border-[var(--border)] bg-[var(--bg-panel)] p-5">
+          <div><h3 className="text-[11px] font-medium">{t('autoSetProxyOnConnect')}</h3><p className="mt-1 text-[9px] leading-4 text-[var(--text-faint)]">{t('autoSetProxyOnConnectHint')}</p></div>
+          <input type="checkbox" checked={autoSetProxyOnConnect} onChange={(event) => onAutoSetProxyOnConnectChange(event.target.checked)} aria-label={t('autoSetProxyOnConnect')} />
+        </div>
         <div className="proxy-settings-card rounded-xl border border-[var(--border)] bg-[var(--bg-panel)] divide-y divide-[var(--border)] overflow-hidden">
         {[['HTTP', 'httpHost', 'httpPort'], ['HTTPS', 'httpsHost', 'httpsPort'], ['SOCKS5', 'socksHost', 'socksPort']].map(([label, host, port]) =>
           <div key={label} className="proxy-settings-row grid grid-cols-[90px_1fr_120px] items-center gap-3 p-4 hover:bg-[var(--bg-hover)] transition-colors">

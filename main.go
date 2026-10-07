@@ -8,7 +8,10 @@ import (
 	"slices"
 	"time"
 
+	"github.com/krabt/krab/internal/system"
 	"github.com/krabt/krab/internal/tray"
+	"github.com/krabt/krab/internal/xray"
+	"github.com/krabt/krab/pkg/profile"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
@@ -31,6 +34,9 @@ var singleInstanceKey = [32]byte{
 func init() {
 	application.RegisterEvent[map[string]int64]("update:progress")
 	application.RegisterEvent[string]("profile:selected")
+	application.RegisterEvent[[]profile.Server]("profiles:changed")
+	application.RegisterEvent[xray.Status]("connection:changed")
+	application.RegisterEvent[system.ProxyStatus]("system-proxy:changed")
 }
 
 func main() {
@@ -95,7 +101,10 @@ func main() {
 	}
 	selectedServerID := ""
 	if settings := backend.GeoSettings(); settings.UI != nil {
-		selectedServerID, _ = settings.UI["selectedServerId"].(string)
+		selectedServerID, _ = settings.UI["lastConnectedServerId"].(string)
+		if selectedServerID == "" {
+			selectedServerID, _ = settings.UI["selectedServerId"].(string)
+		}
 	}
 	selectedServerExists := false
 	for _, choice := range choices {
