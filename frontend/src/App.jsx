@@ -943,6 +943,7 @@ export default function App() {
   const [speedSamples, setSpeedSamples] = useState([])
   const [speedDuration, setSpeedDuration] = useState(60)
   const [speedSeries, setSpeedSeries] = useState(['up', 'down'])
+  const [dailyTrafficRange, setDailyTrafficRange] = useState(15)
   const lastTraffic = useRef(null)
 
   useEffect(() => {
@@ -950,7 +951,7 @@ export default function App() {
       lastTraffic.current = null
       setTraffic({ uplink: 0, downlink: 0 })
       setSpeed({ up: 0, down: 0 })
-      const appendIdleSample = () => setSpeedSamples((current) => [...current.slice(-1799), { up: 0, down: 0, proxyUp: 0, proxyDown: 0, directUp: 0, directDown: 0 }])
+      const appendIdleSample = () => setSpeedSamples((current) => [...current.slice(-17999), { up: 0, down: 0, proxyUp: 0, proxyDown: 0, directUp: 0, directDown: 0 }])
       appendIdleSample()
       const id = setInterval(appendIdleSample, 1000)
       return () => clearInterval(id)
@@ -972,7 +973,7 @@ export default function App() {
             }
           }
           setSpeed(nextSpeed)
-          setSpeedSamples((current) => [...current.slice(-1799), nextSpeed])
+          setSpeedSamples((current) => [...current.slice(-17999), nextSpeed])
           lastTraffic.current = { uplink: t.uplink, downlink: t.downlink, proxy: t.proxy, direct: t.direct, at: Date.now() }
           setTraffic(t)
         })
@@ -1433,7 +1434,7 @@ export default function App() {
         {page === 'logs' ? (
           <LogsView lang={lang} log={log} loading={logLoading} live={logLive} onRefresh={handleShowLog} onToggleLive={() => setLogLive((value) => !value)} />
         ) : page === 'stats' ? (
-          <StatsView t={t} loadTraffic={Traffic} speedSamples={speedSamples} speedDuration={speedDuration} onSpeedDurationChange={setSpeedDuration} speedSeries={speedSeries} onSpeedSeriesChange={setSpeedSeries} connected={isRunning} canConnect={Boolean(selected)} connectionBusy={isBusy} proxyEnabled={proxyStatus.known && proxyStatus.enabled} proxyBusy={proxyAction.busy} onToggleConnection={handleDashboardConnectionToggle} onToggleProxy={handleToggleProxy} />
+          <StatsView t={t} loadTraffic={Traffic} speedSamples={speedSamples} speedDuration={speedDuration} onSpeedDurationChange={setSpeedDuration} speedSeries={speedSeries} onSpeedSeriesChange={setSpeedSeries} dailyTrafficRange={dailyTrafficRange} onDailyTrafficRangeChange={setDailyTrafficRange} connected={isRunning} canConnect={Boolean(selected)} connectionBusy={isBusy} proxyEnabled={proxyStatus.known && proxyStatus.enabled} proxyBusy={proxyAction.busy} onToggleConnection={handleDashboardConnectionToggle} onToggleProxy={handleToggleProxy} />
         ) : page === 'outbound' ? (
           <OutboundSettingsView lang={lang} t={t} loadSettings={OutboundSettings} saveRule={handleSaveOutboundRule} deleteRule={handleDeleteOutboundRule} />
         ) : page === 'proxy-settings' ? (

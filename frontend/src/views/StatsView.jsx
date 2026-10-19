@@ -23,6 +23,11 @@ const formatChartTime = (seconds) => {
   if (seconds === 0) return '0s'
   if (seconds < 60) return `-${seconds}s`
   const minutes = Math.floor(seconds / 60)
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60)
+    const restMinutes = minutes % 60
+    return `-${hours}h${restMinutes ? `${restMinutes}m` : ''}`
+  }
   const rest = seconds % 60
   return `-${minutes}m${rest ? `${rest}s` : ''}`
 }
@@ -47,14 +52,30 @@ function RealtimeSpeedChart({ samples, duration, onDurationChange, selectedSerie
     { key: 'directDown', label: t('directDownload'), color: '#10b981' },
   ]
   const activeSeries = series.filter(({ key }) => selectedSeries.includes(key))
-  const maxValue = Math.max(1, ...visibleSamples.flatMap((sample) => activeSeries.map(({ key }) => sample[key] || 0)))
-  const points = (key) => visibleSamples.map((sample, index) => {
-    const x = left + ((leadingSlots + index) / Math.max(1, duration - 1)) * chartWidth
-    const y = top + chartHeight - (sample[key] / maxValue) * chartHeight
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  }).join(' ')
+  let maxValue = 1
+  for (const sample of visibleSamples) {
+    for (const { key } of activeSeries) maxValue = Math.max(maxValue, sample[key] || 0)
+  }
+  const points = (key) => {
+    const bucketSize = Math.max(1, Math.ceil(visibleSamples.length / 900))
+    const plottedSamples = []
+    for (let start = 0; start < visibleSamples.length; start += bucketSize) {
+      const end = Math.min(visibleSamples.length, start + bucketSize)
+      let peakIndex = start
+      for (let index = start + 1; index < end; index++) {
+        if ((visibleSamples[index][key] || 0) > (visibleSamples[peakIndex][key] || 0)) peakIndex = index
+      }
+      plottedSamples.push({ sample: visibleSamples[peakIndex], index: peakIndex })
+    }
+    return plottedSamples.map(({ sample, index }) => {
+      const x = left + ((leadingSlots + index) / Math.max(1, duration - 1)) * chartWidth
+      const y = top + chartHeight - ((sample[key] || 0) / maxValue) * chartHeight
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    }).join(' ')
+  }
   const current = visibleSamples.at(-1) || {}
-  const durationLabel = duration === 60 ? t('oneMinute') : duration === 300 ? t('fiveMinutes') : t('thirtyMinutes')
+  const durationLabels = { 60: t('oneMinute'), 300: t('fiveMinutes'), 1800: t('thirtyMinutes'), 3600: t('oneHour'), 10800: t('threeHours'), 18000: t('fiveHours') }
+  const durationLabel = durationLabels[duration]
   const toggleSeries = (key) => onSelectedSeriesChange(selectedSeries.includes(key) ? selectedSeries.filter((item) => item !== key) : [...selectedSeries, key])
 
   return <section className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--bg-panel)] p-5">
@@ -63,6 +84,12 @@ function RealtimeSpeedChart({ samples, duration, onDurationChange, selectedSerie
       <div className="flex flex-wrap items-center justify-end gap-3 text-[10px] tabular-nums">
         <div className="flex rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
           {[[60, t('oneMinute')], [300, t('fiveMinutes')], [1800, t('thirtyMinutes')]].map(([seconds, label]) => <button key={seconds} onClick={() => onDurationChange(seconds)} className={`rounded-md px-2 py-1 text-[9px] transition-colors ${duration === seconds ? 'bg-[var(--accent)] text-[var(--accent-text)]' : 'text-[var(--text-faint)] hover:text-[var(--text)]'}`}>{label}</button>)}
+          <select aria-label={t('longerTimeRange')} value={duration >= 3600 ? duration : ''} onChange={(event) => event.target.value && onDurationChange(Number(event.target.value))} className={`rounded-md border-0 px-2 py-1 text-[9px] outline-none ${duration >= 3600 ? 'bg-[var(--accent)] text-[var(--accent-text)]' : 'bg-transparent text-[var(--text-faint)]'}`}>
+            <option value="" disabled>{t('longerTimeRange')}</option>
+            <option value="3600">{t('oneHour')}</option>
+            <option value="10800">{t('threeHours')}</option>
+            <option value="18000">{t('fiveHours')}</option>
+          </select>
         </div>
       </div>
     </div>
@@ -90,7 +117,7 @@ function RealtimeSpeedChart({ samples, duration, onDurationChange, selectedSerie
   </section>
 }
 
-export default function StatsView({ t, loadTraffic, speedSamples, speedDuration, onSpeedDurationChange, speedSeries, onSpeedSeriesChange, connected, canConnect, connectionBusy, proxyEnabled, proxyBusy, onToggleConnection, onToggleProxy }) {
+export default function StatsView({ t, loadTraffic, speedSamples, speedDuration, onSpeedDurationChange, speedSeries, onSpeedSeriesChange, dailyTrafficRange, onDailyTrafficRangeChange, connected, canConnect, connectionBusy, proxyEnabled, proxyBusy, onToggleConnection, onToggleProxy }) {
   const [history, setHistory] = useState({ total: { uplink: 0, downlink: 0 }, daily: [], servers: [] })
 
   useEffect(() => {
@@ -104,7 +131,14 @@ export default function StatsView({ t, loadTraffic, speedSamples, speedDuration,
     return () => { active = false; window.clearInterval(timer) }
   }, [loadTraffic])
 
-  const days = useMemo(() => [...(history.daily || [])].slice(0, 14).reverse(), [history.daily])
+  const days = useMemo(() => {
+    const cutoff = new Date()
+    cutoff.setHours(0, 0, 0, 0)
+    cutoff.setDate(cutoff.getDate() - dailyTrafficRange + 1)
+    return [...(history.daily || [])]
+      .filter((day) => new Date(`${day.date}T00:00:00`) >= cutoff)
+      .reverse()
+  }, [history.daily, dailyTrafficRange])
   const dailySeries = [
     { key: 'up', label: t('totalUpload'), color: '#f59e0b', value: (day) => day.uplink || 0 },
     { key: 'down', label: t('totalDownload'), color: '#22d3ee', value: (day) => day.downlink || 0 },
@@ -154,22 +188,29 @@ export default function StatsView({ t, loadTraffic, speedSamples, speedDuration,
       </div>
 
       <section className="mt-5 rounded-xl border border-[var(--border)] bg-[var(--bg-panel)] p-5">
-        <h2 className="text-xs font-semibold">{t('dailyTraffic')}</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xs font-semibold">{t('dailyTraffic')}</h2>
+          <div className="flex rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
+            {[[15, t('last15Days')], [30, t('lastMonth')], [90, t('last3Months')], [180, t('last6Months')]].map(([range, label]) => <button key={range} type="button" onClick={() => onDailyTrafficRangeChange(range)} className={`rounded-md px-2 py-1 text-[9px] transition-colors ${dailyTrafficRange === range ? 'bg-[var(--accent)] text-[var(--accent-text)]' : 'text-[var(--text-faint)] hover:text-[var(--text)]'}`}>{label}</button>)}
+          </div>
+        </div>
         <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1">
           {dailySeries.map(({ key, label, color }) => <span key={key} className="flex items-center gap-1.5 text-[8px] text-[var(--text-faint)]"><i className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />{label}</span>)}
         </div>
-        {days.length ? <div className="mt-5 flex h-44 items-end gap-2">
-          {days.map((day) => {
-            return <div key={day.date} className="group flex min-w-0 flex-1 flex-col items-center justify-end gap-2">
-              <div className="flex h-[120px] w-full items-end justify-center gap-px">
-                {dailySeries.map(({ key, label, color, value }) => {
-                  const amount = value(day)
-                  return <div key={key} className="min-w-[2px] max-w-2 flex-1 rounded-t-sm" style={{ height: `${Math.max(amount > 0 ? 3 : 1, (amount / maxDaily) * 120)}px`, backgroundColor: color }} title={`${label}: ${formatBytes(amount)}`} />
-                })}
+        {days.length ? <div className="mt-5 overflow-x-auto pb-2">
+          <div className="flex h-44 items-end gap-2" style={{ minWidth: `${Math.max(680, days.length * 14)}px` }}>
+            {days.map((day) => {
+              return <div key={day.date} className="group flex min-w-0 flex-1 flex-col items-center justify-end gap-2">
+                <div className="flex h-[120px] w-full items-end justify-center gap-px">
+                  {dailySeries.map(({ key, label, color, value }) => {
+                    const amount = value(day)
+                    return <div key={key} className="min-w-[2px] max-w-2 flex-1 rounded-t-sm" style={{ height: `${Math.max(amount > 0 ? 3 : 1, (amount / maxDaily) * 120)}px`, backgroundColor: color }} title={`${label}: ${formatBytes(amount)}`} />
+                  })}
+                </div>
+                <div className="truncate text-[8px] text-[var(--text-faint)]">{day.date.slice(5)}</div>
               </div>
-              <div className="truncate text-[8px] text-[var(--text-faint)]">{day.date.slice(5)}</div>
-            </div>
-          })}
+            })}
+          </div>
         </div> : <div className="py-14 text-center text-[10px] text-[var(--text-faint)]">{t('noTrafficHistory')}</div>}
       </section>
 
